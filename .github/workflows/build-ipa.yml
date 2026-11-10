@@ -1,0 +1,46 @@
+name: Gerar Instalador iPhone (.IPA)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    name: Compilar Copiloto Uber iOS (.ipa) na Nuvem
+    runs-on: macos-14
+
+    steps:
+      - name: 1. Baixar código do projeto
+        uses: actions/checkout@v4
+
+      - name: 2. Instalar XcodeGen e gerar projeto Xcode (.xcodeproj) automaticamente
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: 3. Compilar App Principal + Extensão ReplayKit (Sem exigir conta Apple paga)
+        run: |
+          xcodebuild clean build \
+            -project UberDriverHelper.xcodeproj \
+            -scheme UberDriverHelper \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: 4. Empacotar no arquivo UberDriverHelper.ipa (Pronto para Sideloadly / AltStore)
+        run: |
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/UberDriverHelper.app Payload/
+          zip -r9 UberDriverHelper.ipa Payload
+
+      - name: 5. Disponibilizar UberDriverHelper.ipa para Download
+        uses: actions/upload-artifact@v4
+        with:
+          name: UberDriverHelper-IPA-Instalador
+          path: UberDriverHelper.ipa
+          retention-days: 30
+

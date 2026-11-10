@@ -1,0 +1,54 @@
+name: UberDriverHelper
+options:
+  bundleIdPrefix: com.seuapp
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+
+targets:
+  UberDriverHelper:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: App
+      - path: Shared
+    info:
+      path: Config/App-Info.plist
+    entitlements:
+      path: Config/App.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.seuapp.uberhelper
+        PRODUCT_NAME: UberDriverHelper
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Config/App.entitlements
+    dependencies:
+      - target: BroadcastExtension
+        embed: true
+
+  BroadcastExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: BroadcastExtension
+      - path: Shared
+    info:
+      path: Config/BroadcastExtension-Info.plist
+    entitlements:
+      path: Config/BroadcastExtension.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.seuapp.uberhelper.BroadcastExtension
+        PRODUCT_NAME: BroadcastExtension
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Config/BroadcastExtension.entitlements
+        SKIP_INSTALL: YES
+
