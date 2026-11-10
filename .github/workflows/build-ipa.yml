@@ -8,7 +8,7 @@ on:
 jobs:
   build-ipa:
     name: Compilar Copiloto Uber iOS (.ipa) na Nuvem
-    runs-on: macos-14
+    runs-on: macos-latest
 
     steps:
       - name: 1. Baixar código do projeto
