@@ -43,7 +43,7 @@ final class PiPManager: NSObject, ObservableObject {
         let overlayView = PiPOverlayView(viewModel: viewModel)
         let hosting = UIHostingController(rootView: overlayView)
         hosting.view.backgroundColor = .clear
-        hosting.view.frame = CGRect(x: 0, y: 0, width: 380, height: 110)
+        hosting.view.frame = CGRect(x: 0, y: 0, width: 400, height: 200)
         self.hostingController = hosting
         
         // Mantém o stream vivo enviando frames constantes a cada 0.5s
@@ -152,10 +152,12 @@ final class PiPManager: NSObject, ObservableObject {
     private func enqueueRenderedSwiftUIFrame(forceRedraw: Bool) {
         if forceRedraw || needsImageRedraw || cachedPixelBuffer == nil || cachedFormatDescription == nil {
             guard let hostingView = hostingController?.view else { return }
-            let size = CGSize(width: 380, height: 110)
+            let size = CGSize(width: 400, height: 200)
             hostingView.bounds = CGRect(origin: .zero, size: size)
             
-            let renderer = UIGraphicsImageRenderer(size: size)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 2.0 // Alta definição (800x400 pixels reais) para letras super nítidas
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
             let rendered = renderer.image { _ in
                 hostingView.drawHierarchy(in: hostingView.bounds, afterScreenUpdates: true)
             }
@@ -215,9 +217,7 @@ final class PiPManager: NSObject, ObservableObject {
             bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
         ) else { return nil }
         
-        // Alinha o sistema de coordenadas do CoreGraphics com a orientação vertical do UIKit
-        context.translateBy(x: 0, y: CGFloat(height))
-        context.scaleBy(x: 1.0, y: -1.0)
+        // Desenha diretamente na orientação padrão do CGImage (em pé, sem inverter!)
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         
         var formatDescription: CMVideoFormatDescription?

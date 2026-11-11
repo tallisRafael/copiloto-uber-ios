@@ -13,87 +13,94 @@ struct PiPOverlayView: View {
             viewModel.currentVerdict.backgroundColor
                 .ignoresSafeArea()
             
-            VStack(spacing: 6) {
-                // Linha superior: Modo ativo, Nota/Viagens do Passageiro, Alerta de Dinheiro e Ícone de Som
-                HStack(spacing: 6) {
+            VStack(spacing: 12) {
+                // Linha superior: Modo ativo, Nota/Viagens do Passageiro, Alerta de Dinheiro e Meta
+                HStack(spacing: 8) {
                     HStack(spacing: 4) {
                         Image(systemName: viewModel.isTrafficModeEnabled ? "cloud.heavyrain.fill" : "bolt.car.fill")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 13, weight: .bold))
                         Text(viewModel.isTrafficModeEnabled ? "TRÂNSITO" : "ATIVO")
-                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
                     }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.30))
-                    .cornerRadius(6)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.32))
+                    .cornerRadius(8)
                     
                     if viewModel.isGoingHomeModeEnabled {
-                        HStack(spacing: 3) {
+                        HStack(spacing: 4) {
                             Image(systemName: "house.fill")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 12, weight: .bold))
                             Text("CASA")
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                .font(.system(size: 13, weight: .heavy, design: .rounded))
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.black.opacity(0.32))
-                        .cornerRadius(6)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.black.opacity(0.34))
+                        .cornerRadius(8)
                     }
                     
                     if let passengerBadge = viewModel.currentVerdict.passengerBadge {
                         Text(passengerBadge)
-                            .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.36))
-                            .cornerRadius(6)
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Color.black.opacity(0.40))
+                            .cornerRadius(8)
                     }
                     
                     if viewModel.currentVerdict.isCashPayment {
                         Text("💵 DINHEIRO")
-                            .font(.system(size: 10, weight: .black, design: .rounded))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.42))
-                            .cornerRadius(6)
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.black.opacity(0.45))
+                            .cornerRadius(8)
                     }
                     
                     Spacer()
                     
                     HStack(spacing: 4) {
                         Image(systemName: viewModel.audioAlertMode.iconName)
-                            .font(.system(size: 10, weight: .bold))
-                        Text("R$ \(Int(viewModel.totalLucroLiquidoAceito))/\(Int(viewModel.settings.metaDiariaLiquida))")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .font(.system(size: 12, weight: .bold))
+                        Text("R$\(Int(viewModel.totalLucroLiquidoAceito))/\(Int(viewModel.settings.metaDiariaLiquida))")
+                            .font(.system(size: 13, weight: .heavy, design: .monospaced))
                     }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.28))
-                    .cornerRadius(6)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.32))
+                    .cornerRadius(8)
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 14)
                 
-                // Mensagem Principal do Veredito
+                Spacer(minLength: 0)
+                
+                // Mensagem Principal do Veredito (GIGANTE para bater o olho no suporte do carro)
                 Text(viewModel.currentVerdict.message)
-                    .font(.system(size: 21, weight: .black, design: .rounded))
+                    .font(.system(size: 30, weight: .black, design: .rounded))
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                    .padding(.horizontal, 10)
+                    .minimumScaleFactor(0.55)
+                    .lineLimit(2)
+                    .padding(.horizontal, 12)
                 
-                // Linha de métricas complementares (inclui Lucro Líquido Real)
+                Spacer(minLength: 0)
+                
+                // Linha de métricas complementares (Lucro Líquido Real, KM e Tempo)
                 Text(viewModel.currentVerdict.detailMetrics)
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.95))
+                    .font(.system(size: 17, weight: .heavy, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.98))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 10)
+                    .minimumScaleFactor(0.65)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.black.opacity(0.25))
             }
-            .padding(.vertical, 8)
+            .padding(.top, 12)
         }
-        .frame(width: 380, height: 110)
+        .frame(width: 400, height: 200)
     }
 }
 

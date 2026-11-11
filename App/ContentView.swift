@@ -29,7 +29,7 @@ struct SampleBufferLayerHostView: UIViewRepresentable {
     func makeUIView(context: Context) -> LayerContainerUIView {
         let view = LayerContainerUIView()
         view.backgroundColor = .clear
-        displayLayer.frame = CGRect(x: 0, y: 0, width: 380, height: 110)
+        displayLayer.frame = CGRect(x: 0, y: 0, width: 400, height: 200)
         displayLayer.videoGravity = .resizeAspectFill
         view.displayLayer = displayLayer
         view.onMovedToWindow = onAttached
@@ -202,12 +202,12 @@ struct ContentView: View {
                             }
                         )
                         .frame(maxWidth: .infinity)
-                        .frame(height: 110)
+                        .frame(height: 175)
                         .cornerRadius(16)
                         
                         PiPOverlayView(viewModel: viewModel)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 110)
+                            .frame(height: 175)
                             .cornerRadius(16)
                             .allowsHitTesting(false)
                     }
@@ -576,7 +576,7 @@ struct ContentView: View {
                 // Mini Visor no Topo do Simulador para ver o resultado na hora sem trocar de aba
                 PiPOverlayView(viewModel: viewModel)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 110)
+                    .frame(height: 175)
                     .cornerRadius(14)
                     .shadow(radius: 6)
                 
