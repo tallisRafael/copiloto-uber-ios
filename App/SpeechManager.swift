@@ -107,10 +107,10 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
         case .beep:
             playSystemBeep(for: status)
         case .voice:
+            // Toca o bipe imediato de confirmação E em seguida fala com a voz da Siri
+            playSystemBeep(for: status)
             if let text = verdict.speechText, !text.isEmpty {
                 speakGiguStyle(text, forceInterrupt: isSimulated)
-            } else {
-                playSystemBeep(for: status)
             }
         }
     }
@@ -118,14 +118,36 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
     private func playSystemBeep(for status: VerdictStatus) {
         switch status {
         case .approved, .goingHome:
-            AudioServicesPlaySystemSound(1057)
+            AudioServicesPlaySystemSound(1057) // Suave e positivo
         case .warning:
-            AudioServicesPlaySystemSound(1106)
+            AudioServicesPlaySystemSound(1106) // Alerta atenção
         case .rejected:
-            AudioServicesPlaySystemSound(1073)
+            AudioServicesPlaySystemSound(1073) // Alerta grave
         case .waiting:
             break
         }
+    }
+    
+    /// Seleciona a melhor voz natural da Siri disponível em pt-BR no iOS 18 / iPhone 16
+    private func selectNaturalSiriVoice() -> AVSpeechSynthesisVoice? {
+        let allVoices = AVSpeechSynthesisVoice.speechVoices()
+        let ptBrVoices = allVoices.filter { $0.language == "pt-BR" }
+        
+        // 1. Procura primeiro pelas vozes da Siri ou Vozes Premium/Enhanced instaladas no iOS
+        if let siriVoice = ptBrVoices.first(where: {
+            $0.identifier.localizedCaseInsensitiveContains("siri") ||
+            $0.quality == .premium ||
+            $0.quality == .enhanced
+        }) {
+            return siriVoice
+        }
+        
+        // 2. Fallback para voz feminina natural padrão do iOS pt-BR (Luciana/Francisca ou padrão)
+        if let defaultPt = AVSpeechSynthesisVoice(language: "pt-BR") {
+            return defaultPt
+        }
+        
+        return AVSpeechSynthesisVoice(identifier: AVSpeechSynthesisVoiceIdentifierAlex)
     }
     
     private func speakGiguStyle(_ text: String, forceInterrupt: Bool) {
@@ -139,12 +161,13 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
         }
         
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "pt-BR")
-        // Velocidade 0.50 = ritmo natural da Siri em Português (sem embolar números com o toque da Uber)
-        utterance.rate = 0.50
-        utterance.pitchMultiplier = 1.0
+        utterance.voice = selectNaturalSiriVoice()
+        
+        // Velocidade 0.49 e pitch natural = entonação humana da Siri, sem soar como robô
+        utterance.rate = 0.49
+        utterance.pitchMultiplier = 1.02
         utterance.volume = 1.0
-        utterance.preUtteranceDelay = 0.08
+        utterance.preUtteranceDelay = 0.15 // Pequeno intervalo para o bipe tocar cristalino antes da fala
         
         synthesizer.speak(utterance)
     }
