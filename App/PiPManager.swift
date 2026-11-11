@@ -6,26 +6,25 @@ import SwiftUI
 import UIKit
 
 /// Gerenciador responsável por alimentar a `AVSampleBufferDisplayLayer`,
-/// ativar a sessão de áudio em background e controlar a janela flutuante do Picture-in-Picture (PiP).
+/// ativar a sessão de áudio em background e controlar a janela flutuante do Picture-in-Picture (PiP) no padrão GigU.
 /// IMPORTANTE: Nunca defina `sampleBufferDisplayLayer.controlTimebase` manualmente, pois o
-/// `AVPictureInPictureController` gerencia o timebase internamente (defini-lo manualmente causa NSInvalidArgumentException).
+/// `AVPictureInPictureController` gerencia o timebase internamente.
 final class PiPManager: NSObject, ObservableObject {
     
     @Published private(set) var isPiPActive: Bool = false
     @Published private(set) var isPiPReady: Bool = false
     
-    /// Layer de vídeo que exibe o card do Copiloto e sustenta o Picture-in-Picture
+    /// Layer de vídeo que exibe o card do Copiloto (3 Colunas GigU) e sustenta o Picture-in-Picture
     let sampleBufferDisplayLayer = AVSampleBufferDisplayLayer()
     
     private var pipController: AVPictureInPictureController?
-    private var hostingController: UIHostingController<PiPOverlayView>?
     private var refreshTimer: Timer?
     private weak var viewModel: RideAssistantViewModel?
     private var possibleObservation: NSKeyValueObservation?
     private var pendingManualStart: Bool = false
+    private var hasConfiguredAudioSession: Bool = false
     
-    /// Cache do último buffer de vídeo renderizado da SwiftUI View
-    private var cachedRenderedImage: UIImage?
+    /// Cache do último buffer de vídeo renderizado
     private var cachedPixelBuffer: CVPixelBuffer?
     private var cachedFormatDescription: CMVideoFormatDescription?
     private var needsImageRedraw: Bool = true
@@ -35,16 +34,10 @@ final class PiPManager: NSObject, ObservableObject {
         possibleObservation?.invalidate()
     }
     
-    /// Configura a sessão de áudio e prepara o gerador de frames (o `AVPictureInPictureController` é criado quando a view entra na janela)
+    /// Configura a sessão de áudio e prepara o gerador de frames
     func setup(with viewModel: RideAssistantViewModel) {
         self.viewModel = viewModel
-        configureAudioSessionForPiP()
-        
-        let overlayView = PiPOverlayView(viewModel: viewModel)
-        let hosting = UIHostingController(rootView: overlayView)
-        hosting.view.backgroundColor = .clear
-        hosting.view.frame = CGRect(x: 0, y: 0, width: 400, height: 200)
-        self.hostingController = hosting
+        configureAudioSessionForPiP(force: true)
         
         // Mantém o stream vivo enviando frames constantes a cada 0.5s
         refreshTimer?.invalidate()
@@ -57,7 +50,7 @@ final class PiPManager: NSObject, ObservableObject {
     func notifyLayerMovedToWindow() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.configureAudioSessionForPiP()
+            self.configureAudioSessionForPiP(force: false)
             self.enqueueRenderedSwiftUIFrame(forceRedraw: true)
             self.initializePiPControllerIfNeeded()
         }
@@ -94,7 +87,7 @@ final class PiPManager: NSObject, ObservableObject {
     
     /// Liga ou desliga manualmente a janela flutuante quando o motorista toca no botão
     func togglePiP() {
-        configureAudioSessionForPiP()
+        configureAudioSessionForPiP(force: false)
         enqueueRenderedSwiftUIFrame(forceRedraw: true)
         initializePiPControllerIfNeeded()
         
@@ -128,40 +121,39 @@ final class PiPManager: NSObject, ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.needsImageRedraw = true
-            self.hostingController?.view.setNeedsLayout()
-            self.hostingController?.view.layoutIfNeeded()
             self.enqueueRenderedSwiftUIFrame(forceRedraw: true)
             self.pipController?.invalidatePlaybackState()
         }
     }
     
-    // MARK: - Sessão de Áudio obrigatória para PiP em Background
+    // MARK: - Sessão de Áudio obrigatória para PiP + Voz sem engasgos
     
-    private func configureAudioSessionForPiP() {
+    private func configureAudioSessionForPiP(force: Bool) {
+        guard force || !hasConfiguredAudioSession else { return }
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
+            hasConfiguredAudioSession = true
         } catch {
             print("[PiPManager] Falha ao configurar AVAudioSession: \(error)")
         }
     }
     
-    // MARK: - Geração de CMSampleBuffer
+    // MARK: - Geração de CMSampleBuffer (Funciona 100% em Background sobre a Uber e 100% em Pé!)
     
     private func enqueueRenderedSwiftUIFrame(forceRedraw: Bool) {
         if forceRedraw || needsImageRedraw || cachedPixelBuffer == nil || cachedFormatDescription == nil {
-            guard let hostingView = hostingController?.view else { return }
-            let size = CGSize(width: 400, height: 200)
-            hostingView.bounds = CGRect(origin: .zero, size: size)
-            
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 2.0 // Alta definição (800x400 pixels reais) para letras super nítidas
-            let renderer = UIGraphicsImageRenderer(size: size, format: format)
-            let rendered = renderer.image { _ in
-                hostingView.drawHierarchy(in: hostingView.bounds, afterScreenUpdates: true)
-            }
-            cachedRenderedImage = rendered
+            guard let viewModel = viewModel else { return }
+            // Desenho 100% UIKit/CoreGraphics: funciona com o app em segundo plano atrás da Uber
+            let rendered = PiPCardRenderer.render(PiPCardRenderer.Input(
+                verdict: viewModel.currentVerdict,
+                metaAtual: viewModel.totalLucroLiquidoAceito,
+                metaTotal: viewModel.settings.metaDiariaLiquida,
+                minGanhoKm: viewModel.settings.minGanhoKmNormal,
+                minGanhoHora: viewModel.settings.minGanhoHoraNormal,
+                isTrafficMode: viewModel.isTrafficModeEnabled
+            ))
             if let (buffer, formatDesc) = buildPixelBuffer(from: rendered) {
                 cachedPixelBuffer = buffer
                 cachedFormatDescription = formatDesc
@@ -217,7 +209,7 @@ final class PiPManager: NSObject, ObservableObject {
             bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
         ) else { return nil }
         
-        // Desenha diretamente na orientação padrão do CGImage (em pé, sem inverter!)
+        // Em CGBitmapContext, context.draw(cgImage) sem flip já coloca o topo da imagem no byte 0 (topo do vídeo = 100% EM PÉ!)
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         
         var formatDescription: CMVideoFormatDescription?
@@ -249,6 +241,12 @@ final class PiPManager: NSObject, ObservableObject {
             sampleBufferOut: &sampleBuffer
         )
         
+        if let sb = sampleBuffer,
+           let attachments = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true) as? [NSMutableDictionary],
+           let first = attachments.first {
+            first[kCMSampleAttachmentKey_DisplayImmediately] = kCFBooleanTrue
+        }
+        
         return sampleBuffer
     }
 }
@@ -257,31 +255,9 @@ final class PiPManager: NSObject, ObservableObject {
 
 extension PiPManager: AVPictureInPictureControllerDelegate {
     
-    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self,
-                  let hostingView = self.hostingController?.view else {
-                return
-            }
-            
-            let allWindows = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .flatMap { $0.windows }
-            
-            guard let pipWindow = allWindows.first(where: {
-                String(describing: type(of: $0)).contains("PGHostedWindow")
-            }) else {
-                return
-            }
-            
-            hostingView.frame = pipWindow.bounds
-            hostingView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            pipWindow.addSubview(hostingView)
-        }
-    }
-    
     func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         isPiPActive = true
+        refreshNow()
     }
     
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {

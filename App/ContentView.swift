@@ -202,12 +202,12 @@ struct ContentView: View {
                             }
                         )
                         .frame(maxWidth: .infinity)
-                        .frame(height: 175)
+                        .frame(height: 210)
                         .cornerRadius(16)
                         
                         PiPOverlayView(viewModel: viewModel)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 175)
+                            .frame(height: 210)
                             .cornerRadius(16)
                             .allowsHitTesting(false)
                     }
@@ -576,7 +576,7 @@ struct ContentView: View {
                 // Mini Visor no Topo do Simulador para ver o resultado na hora sem trocar de aba
                 PiPOverlayView(viewModel: viewModel)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 175)
+                    .frame(height: 210)
                     .cornerRadius(14)
                     .shadow(radius: 6)
                 

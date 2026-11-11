@@ -2,105 +2,165 @@ import SwiftUI
 import ReplayKit
 import UIKit
 
-/// View injetada dentro da janela flutuante do Picture-in-Picture (PiP).
-/// Desenhada com estética Automotiva Premium (alto contraste, leitura em 0.3s e sem poluição visual).
+/// Janela Flutuante (PiP) desenhada no padrão clássico do GigU:
+/// - Topo com Semáforo Vibrante + Veredito + Nota/Viagens do Passageiro
+/// - Centro dividido nas 3 Caixas Grandes Lado a Lado: [R$/KM] | [R$/HORA] | [LUCRO LÍQ.]
+/// - Rodapé com Tempo, Distância Total, KM de Busca e Destino
 struct PiPOverlayView: View {
     @ObservedObject var viewModel: RideAssistantViewModel
     
     var body: some View {
+        let verdict = viewModel.currentVerdict
+        let statusColor = verdict.backgroundColor
+        
         ZStack {
-            // Cor de fundo dinâmica do Semáforo
-            viewModel.currentVerdict.backgroundColor
+            // Fundo escuro automotivo com borda grossa na cor do Semáforo (estilo GigU)
+            Color(red: 0.07, green: 0.09, blue: 0.12)
                 .ignoresSafeArea()
             
-            VStack(spacing: 12) {
-                // Linha superior: Modo ativo, Nota/Viagens do Passageiro, Alerta de Dinheiro e Meta
+            VStack(spacing: 0) {
+                // 1. FAIXA DE TOPO (CABEÇALHO SEMÁFORO GIGU)
                 HStack(spacing: 8) {
-                    HStack(spacing: 4) {
-                        Image(systemName: viewModel.isTrafficModeEnabled ? "cloud.heavyrain.fill" : "bolt.car.fill")
-                            .font(.system(size: 13, weight: .bold))
-                        Text(viewModel.isTrafficModeEnabled ? "TRÂNSITO" : "ATIVO")
-                            .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.32))
-                    .cornerRadius(8)
+                    Text(verdict.message)
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
                     
-                    if viewModel.isGoingHomeModeEnabled {
-                        HStack(spacing: 4) {
-                            Image(systemName: "house.fill")
-                                .font(.system(size: 12, weight: .bold))
-                            Text("CASA")
-                                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Color.black.opacity(0.34))
-                        .cornerRadius(8)
-                    }
+                    Spacer(minLength: 4)
                     
-                    if let passengerBadge = viewModel.currentVerdict.passengerBadge {
-                        Text(passengerBadge)
-                            .font(.system(size: 15, weight: .black, design: .rounded))
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(Color.black.opacity(0.40))
-                            .cornerRadius(8)
-                    }
-                    
-                    if viewModel.currentVerdict.isCashPayment {
+                    if verdict.isCashPayment {
                         Text("💵 DINHEIRO")
                             .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundColor(.yellow)
                             .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
+                            .padding(.vertical, 4)
                             .background(Color.black.opacity(0.45))
-                            .cornerRadius(8)
+                            .cornerRadius(6)
                     }
                     
-                    Spacer()
-                    
-                    HStack(spacing: 4) {
-                        Image(systemName: viewModel.audioAlertMode.iconName)
-                            .font(.system(size: 12, weight: .bold))
-                        Text("R$\(Int(viewModel.totalLucroLiquidoAceito))/\(Int(viewModel.settings.metaDiariaLiquida))")
-                            .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                    if let badge = verdict.passengerBadge {
+                        Text(badge)
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.38))
+                            .cornerRadius(6)
+                    } else {
+                        Text("META R$\(Int(viewModel.totalLucroLiquidoAceito))/\(Int(viewModel.settings.metaDiariaLiquida))")
+                            .font(.system(size: 13, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.35))
+                            .cornerRadius(6)
                     }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.32))
-                    .cornerRadius(8)
                 }
-                .foregroundColor(.white)
                 .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(statusColor)
                 
-                Spacer(minLength: 0)
-                
-                // Mensagem Principal do Veredito (GIGANTE para bater o olho no suporte do carro)
-                Text(viewModel.currentVerdict.message)
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.55)
-                    .lineLimit(2)
+                // 2. MIOLO CENTRAL: OS 3 BLOCOS GIGANTES DO GIGU (R$/KM | R$/HORA | LÍQUIDO)
+                if verdict.status == .waiting {
+                    VStack(spacing: 8) {
+                        Spacer(minLength: 0)
+                        HStack(spacing: 10) {
+                            giguMetricBox(
+                                title: "GANHO / KM",
+                                value: "R$ \(String(format: "%.2f", viewModel.settings.minGanhoKmNormal).replacingOccurrences(of: ".", with: ","))+",
+                                accentColor: .green
+                            )
+                            giguMetricBox(
+                                title: "GANHO / HORA",
+                                value: "R$ \(Int(viewModel.settings.minGanhoHoraNormal))+",
+                                accentColor: .cyan
+                            )
+                            giguMetricBox(
+                                title: "META 250+",
+                                value: "R$ \(Int(viewModel.totalLucroLiquidoAceito))",
+                                accentColor: .orange
+                            )
+                        }
+                        .padding(.horizontal, 12)
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        giguMetricBox(
+                            title: "GANHO / KM",
+                            value: verdict.ganhoPorKmText,
+                            accentColor: statusColor
+                        )
+                        
+                        giguMetricBox(
+                            title: "GANHO / HORA",
+                            value: verdict.ganhoPorHoraText,
+                            accentColor: statusColor
+                        )
+                        
+                        giguMetricBox(
+                            title: "LUCRO LIVRE",
+                            value: verdict.lucroLiquidoText,
+                            accentColor: statusColor
+                        )
+                    }
                     .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                    .frame(maxHeight: .infinity)
+                }
                 
-                Spacer(minLength: 0)
-                
-                // Linha de métricas complementares (Lucro Líquido Real, KM e Tempo)
-                Text(viewModel.currentVerdict.detailMetrics)
-                    .font(.system(size: 17, weight: .heavy, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.98))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.black.opacity(0.25))
+                // 3. FAIXA INFERIOR: TEMPO, KM DE BUSCA E DESTINO
+                HStack(spacing: 8) {
+                    Text(verdict.tempoEDistanciaText)
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    
+                    Spacer(minLength: 4)
+                    
+                    Text(verdict.rotaResumoText)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.cyan)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Color.black.opacity(0.55))
             }
-            .padding(.top, 12)
         }
-        .frame(width: 400, height: 200)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(statusColor, lineWidth: 5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private func giguMetricBox(title: String, value: String, accentColor: Color) -> some View {
+        VStack(spacing: 5) {
+            Text(title)
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundColor(.white.opacity(0.75))
+                .lineLimit(1)
+            
+            Text(value)
+                .font(.system(size: 26, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 6)
+        .background(accentColor.opacity(0.22))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(accentColor.opacity(0.85), lineWidth: 2)
+        )
     }
 }
 

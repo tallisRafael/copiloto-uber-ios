@@ -173,9 +173,9 @@ struct RideExtractedData: Identifiable, Codable, Equatable {
         return lucroLiquido(custoPorKm: custoPorKm, extraReturnKm: extraReturnKm) / (totalMin / 60.0)
     }
     
-    /// Identificador de conteúdo da corrida para deduplicar histórico e alerta de voz
+    /// Identificador numérico estável da corrida (imune a pequenas variações de letras do endereço entre frames do OCR)
     var fingerprint: String {
-        String(format: "%.2f_%.1f_%.0f_%@", valorTotal, kmTotal, tempoTotal, enderecoDestino)
+        String(format: "%.2f_%.1f_%.0f", valorTotal, kmTotal, tempoTotal)
     }
 }
 
@@ -188,7 +188,7 @@ enum VerdictStatus: String, Codable, Equatable {
     case rejected   // Vermelho (Cilada ou Zona de Risco)
 }
 
-/// Resultado final da avaliação da corrida para alimentar a janela flutuante (PiP)
+/// Resultado final da avaliação da corrida para alimentar a janela flutuante (PiP) no padrão visual GigU (3 Colunas Grandes)
 struct RideVerdict: Equatable {
     let status: VerdictStatus
     let message: String
@@ -197,6 +197,45 @@ struct RideVerdict: Equatable {
     let isCashPayment: Bool
     let speechText: String?
     
+    // Métricas separadas para os 3 Blocos Gigantes estilo GigU (R$/KM | R$/HORA | LUCRO LÍQ.)
+    let ganhoPorKmText: String
+    let ganhoPorHoraText: String
+    let lucroLiquidoText: String
+    let valorBrutoText: String
+    let tempoEDistanciaText: String
+    let rotaResumoText: String
+    let ridePrice: Double
+    
+    init(
+        status: VerdictStatus,
+        message: String,
+        detailMetrics: String,
+        passengerBadge: String?,
+        isCashPayment: Bool,
+        speechText: String?,
+        ganhoPorKmText: String = "--",
+        ganhoPorHoraText: String = "--",
+        lucroLiquidoText: String = "--",
+        valorBrutoText: String = "R$ --",
+        tempoEDistanciaText: String = "Aguardando chamada da Uber",
+        rotaResumoText: String = "Maringá • Sarandi • Marialva",
+        ridePrice: Double = 0.0
+    ) {
+        self.status = status
+        self.message = message
+        self.detailMetrics = detailMetrics
+        self.passengerBadge = passengerBadge
+        self.isCashPayment = isCashPayment
+        self.speechText = speechText
+        self.ganhoPorKmText = ganhoPorKmText
+        self.ganhoPorHoraText = ganhoPorHoraText
+        self.lucroLiquidoText = lucroLiquidoText
+        self.valorBrutoText = valorBrutoText
+        self.tempoEDistanciaText = tempoEDistanciaText
+        self.rotaResumoText = rotaResumoText
+        self.ridePrice = ridePrice
+    }
+    
     var isApproved: Bool {
         status == .approved || status == .goingHome || status == .warning || status == .waiting
     }
@@ -204,15 +243,15 @@ struct RideVerdict: Equatable {
     var backgroundColor: Color {
         switch status {
         case .approved:
-            return Color(red: 0.10, green: 0.65, blue: 0.25) // Verde Vibrante
+            return Color(red: 0.06, green: 0.68, blue: 0.28) // Verde GigU Vibrante
         case .goingHome:
-            return Color(red: 0.08, green: 0.48, blue: 0.78) // Azul Royal / Retorno Maringá
+            return Color(red: 0.06, green: 0.48, blue: 0.82) // Azul Retorno Maringá
         case .warning:
-            return Color(red: 0.85, green: 0.50, blue: 0.05) // Laranja / Amarelo Escuro
+            return Color(red: 0.88, green: 0.52, blue: 0.04) // Amarelo/Laranja GigU
         case .rejected:
-            return Color(red: 0.85, green: 0.15, blue: 0.15) // Vermelho Alerta
+            return Color(red: 0.86, green: 0.14, blue: 0.16) // Vermelho GigU Alerta
         case .waiting:
-            return Color(red: 0.16, green: 0.22, blue: 0.30) // Grafite Azulado Neutro
+            return Color(red: 0.14, green: 0.18, blue: 0.24) // Grafite Escuro Automotivo
         }
     }
     
@@ -222,7 +261,14 @@ struct RideVerdict: Equatable {
         detailMetrics: "Abra o app da Uber com o PiP ativo",
         passengerBadge: nil,
         isCashPayment: false,
-        speechText: nil
+        speechText: nil,
+        ganhoPorKmText: "--",
+        ganhoPorHoraText: "--",
+        lucroLiquidoText: "--",
+        valorBrutoText: "PRONTO",
+        tempoEDistanciaText: "Monitorando tela da Uber em tempo real",
+        rotaResumoText: "Maringá • Sarandi • Marialva",
+        ridePrice: 0.0
     )
     
     static func systemStatus(_ title: String, subtitle: String = "Verifique a transmissão de tela") -> RideVerdict {
@@ -232,7 +278,14 @@ struct RideVerdict: Equatable {
             detailMetrics: subtitle,
             passengerBadge: nil,
             isCashPayment: false,
-            speechText: nil
+            speechText: nil,
+            ganhoPorKmText: "--",
+            ganhoPorHoraText: "--",
+            lucroLiquidoText: "--",
+            valorBrutoText: "STATUS",
+            tempoEDistanciaText: subtitle,
+            rotaResumoText: "Maringá • Sarandi • Marialva",
+            ridePrice: 0.0
         )
     }
 }
@@ -350,8 +403,10 @@ final class RideRuleEngine {
         
         let ganhoKmStr = String(format: "%.2f", ride.ganhoKm).replacingOccurrences(of: ".", with: ",")
         let ganhoHoraStr = String(format: "%.2f", effectiveGanhoHora).replacingOccurrences(of: ".", with: ",")
+        let ganhoHoraCurtoStr = String(format: "%.0f", effectiveGanhoHora)
         let velMediaStr = String(format: "%.0f", effectiveVelMedia)
         let lucroLiqStr = String(format: "%.2f", lucroLiq).replacingOccurrences(of: ".", with: ",")
+        let valorBrutoStr = String(format: "R$ %.2f", ride.valorTotal).replacingOccurrences(of: ".", with: ",")
         
         let timeLabel: String = {
             if settings.usarVerificacaoAppleMaps, let map = mapVerification, abs(map.minutesDifferenceFromUber) >= 3.0 {
@@ -359,6 +414,11 @@ final class RideRuleEngine {
             }
             return String(format: "%.0f min", baseRideMinutes)
         }()
+        
+        let kmTotalStr = String(format: "%.1f km", ride.kmTotal).replacingOccurrences(of: ".", with: ",")
+        let kmBuscaCurtoStr = String(format: "%.1f km", ride.kmBusca).replacingOccurrences(of: ".", with: ",")
+        let tempoEDistanciaGigu = "⏱ \(timeLabel) (\(kmTotalStr)) • Busca \(kmBuscaCurtoStr)"
+        let rotaResumoGigu = "→ \(ride.enderecoDestino)"
         
         let metricsSummary: String = {
             if settings.exibirLucroLiquidoNoPiP {
@@ -383,67 +443,87 @@ final class RideRuleEngine {
             return "★ \(notaStr)\(tripsStr)\(checkStr)"
         }()
         
+        // Fala natural estilo GigU (ex: "1 e 85 o K M" em vez de "1 vírgula 85 por quilômetro")
+        let spokenKm = spokenKmRate(ride.ganhoKm)
+        let spokenHora = "\(Int(round(effectiveGanhoHora))) por hora"
+        let spokenLucro = "livre \(Int(round(lucroLiq))) reais"
+        
+        func buildGiguVerdict(
+            status: VerdictStatus,
+            message: String,
+            detailMetrics: String,
+            isCash: Bool? = nil,
+            speech: String
+        ) -> RideVerdict {
+            return RideVerdict(
+                status: status,
+                message: message,
+                detailMetrics: detailMetrics,
+                passengerBadge: badge,
+                isCashPayment: isCash ?? ride.pagamentoEmDinheiro,
+                speechText: speech,
+                ganhoPorKmText: "R$ \(ganhoKmStr)",
+                ganhoPorHoraText: "R$ \(ganhoHoraCurtoStr)/h",
+                lucroLiquidoText: "R$ \(lucroLiqStr)",
+                valorBrutoText: valorBrutoStr,
+                tempoEDistanciaText: tempoEDistanciaGigu,
+                rotaResumoText: rotaResumoGigu,
+                ridePrice: ride.valorTotal
+            )
+        }
+        
         // PRIORIDADE 1: Zona de Risco / Proibida Manual (Qualquer distância, embarque ou destino)
         if let matchedDanger = findMatchingKeyword(
             in: "\(ride.enderecoBusca) \(ride.enderecoDestino)",
             keywords: settings.dangerZoneKeywords
         ) {
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .rejected,
                 message: discreet ? "FORA DE ROTA: RESTRITA" : "PERIGO: \(matchedDanger.uppercased())",
                 detailMetrics: discreet ? metricsSummary : "Zona Proibida • \(metricsSummary)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: discreet ? "Recusar: fora de rota." : "Perigo! Zona proibida: \(matchedDanger)."
+                speech: discreet ? "Recusar, fora de rota." : "Vermelha! Zona proibida \(matchedDanger)."
             )
         }
         
         // PRIORIDADE 1.5: Zona Evitada Aprendida por Machine Learning
         if settings.usarAprendizadoDeMaquina, let insight = learnedInsight, insight.isLearnedDanger {
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .rejected,
                 message: discreet ? "FORA DE ROTA: IA" : "🧠 IA: VOCÊ EVITA \(insight.regionName.uppercased())",
                 detailMetrics: "Padrão de recusa detectado • \(metricsSummary)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: discreet ? "Recusar: região evitada." : "Alerta de aprendizado: você costuma evitar \(insight.regionName)."
+                speech: discreet ? "Recusar, região evitada." : "Vermelha! Região evitada \(insight.regionName)."
             )
         }
         
         // PRIORIDADE 2: Bloqueio de Pagamento em Dinheiro (Modo Noturno / Segurança)
         if settings.recusarCorridasDinheiro && ride.pagamentoEmDinheiro {
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .rejected,
                 message: discreet ? "RECUSAR: MODALIDADE" : "CILADA: PGTO EM DINHEIRO",
                 detailMetrics: metricsSummary,
-                passengerBadge: badge,
-                isCashPayment: true,
-                speechText: discreet ? "Recusar: modalidade." : "Cilada: pagamento em dinheiro."
+                isCash: true,
+                speech: discreet ? "Recusar, modalidade." : "Vermelha! Pagamento em dinheiro."
             )
         }
         
         // PRIORIDADE 3: Múltiplas Paradas
         if ride.temParada {
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .rejected,
                 message: discreet ? "RECUSAR: PARADAS" : "CILADA: TEM PARADA",
                 detailMetrics: metricsSummary,
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: discreet ? "Recusar: inclui paradas." : "Cilada: tem parada."
+                speech: discreet ? "Recusar, inclui paradas." : "Vermelha! Corrida com parada."
             )
         }
         
         // PRIORIDADE 4: Nota do Passageiro Abaixo do Mínimo
         if let nota = ride.notaPassageiro, nota < settings.minNotaPassageiro, settings.reprovarNotaBaixa {
             let notaStr = String(format: "%.2f", nota).replacingOccurrences(of: ".", with: ",")
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .rejected,
                 message: discreet ? "RECUSAR: CRITÉRIO (\(notaStr))" : "CILADA: NOTA BAIXA (\(notaStr))",
                 detailMetrics: metricsSummary,
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: discreet ? "Recusar: critério de nota." : "Cilada: passageiro com nota baixa, \(notaStr)."
+                speech: discreet ? "Recusar, critério de nota." : "Vermelha! Passageiro nota baixa."
             )
         }
         
@@ -452,15 +532,13 @@ final class RideRuleEngine {
         if isGoingToDeadheadDestination, let destName = destinationDeadheadMatch {
             if ride.ganhoKm < settings.minGanhoKmListaNegra && ganhoHoraLiqComVolta < 30.0 {
                 let liqHoraStr = String(format: "%.0f", ganhoHoraLiqComVolta)
-                return RideVerdict(
+                return buildGiguVerdict(
                     status: .rejected,
                     message: "CILADA: VOLTA VAZIA (\(destName.uppercased()))",
                     detailMetrics: "R$ \(ganhoKmStr)/km • C/ volta: Líq R$ \(lucroLiqStr) (R$\(liqHoraStr)/h)",
-                    passengerBadge: badge,
-                    isCashPayment: ride.pagamentoEmDinheiro,
-                    speechText: discreet
-                        ? "Recusar: \(destName) não compensa a volta."
-                        : "Cilada para \(destName): apenas \(ganhoKmStr) por quilômetro, sobra \(lucroLiqStr) reais descontando a volta."
+                    speech: discreet
+                        ? "Recusar, \(destName) não compensa."
+                        : "Vermelha! Volta vazia \(destName), só \(spokenKm), \(spokenLucro)."
                 )
             }
         }
@@ -471,13 +549,11 @@ final class RideRuleEngine {
            insight.isLearnedDeadhead,
            ride.ganhoKm < settings.minGanhoKmListaNegra {
             let waitMin = Int(insight.averageWaitMinutes)
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .rejected,
                 message: "🧠 IA: VOLTA VAZIA (\(waitMin)m S/ CORRIDA)",
                 detailMetrics: "Dest: \(insight.regionName) • R$ \(ganhoKmStr)/km",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: "Cilada aprendida: \(insight.regionName) costuma deixar \(waitMin) minutos sem corrida."
+                speech: "Vermelha! Volta vazia em \(insight.regionName), só \(spokenKm)."
             )
         }
         
@@ -487,19 +563,15 @@ final class RideRuleEngine {
            ride.ganhoKm >= settings.minGanhoKmRumoACasa,
            ride.tempoBuscaMin <= settings.maxTempoBuscaMin {
             let label = isReturningFromOutskirts ? "🏠 VOLTA P/ \(matchedHome.uppercased())" : "🏠 RUMO A CASA"
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .goingHome,
                 message: "\(label): R$\(ganhoKmStr)/km",
                 detailMetrics: "Dest: \(matchedHome) • Líq R$ \(lucroLiqStr)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: "Retorno para \(matchedHome)! \(ganhoKmStr) por quilômetro."
+                speech: "Azul! Volta pra \(matchedHome), \(spokenKm), \(spokenLucro)."
             )
         }
         
         // PRIORIDADE 7: Exceção de Ouro (Avaliada com o ganho/hora real corrigido pelo Apple Maps se disponível)
-        // Nota: Se for embarque em Supermercado/Atacadão ou Conta Nova (< minViagensPassageiro), não pula para Exceção de Ouro cega,
-        // garantindo que o motorista veja o alerta laranja de carrinho de compras ou conta recém-criada!
         let matchedMarket = findMatchingKeyword(in: ride.enderecoBusca, keywords: settings.marketPickupKeywords)
         let isNewAccount = (ride.numeroViagensPassageiro != nil) && (ride.numeroViagensPassageiro! < settings.minViagensPassageiro)
         let willHitDailyGoal = (currentDailyNetProfit > 0.0) &&
@@ -518,41 +590,35 @@ final class RideRuleEngine {
                 }
                 return (mapVerification?.uberOverestimatedTime == true) ? "🗺️ MAPS TOP" : "CORRIDA TOP"
             }()
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .approved,
                 message: "\(prefix): R$\(ganhoKmStr)/km",
                 detailMetrics: "R$ \(ganhoHoraStr)/h • \(metricsSummary)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: willHitDailyGoal
-                    ? "Corrida top! Com ela você bate sua meta de \(metaIntStr) reais!"
-                    : "Corrida top! \(ganhoKmStr) por quilômetro, lucro \(lucroLiqStr) reais."
+                speech: willHitDailyGoal
+                    ? "Verde top! Bate a meta de \(metaIntStr)! \(spokenKm), \(spokenLucro)."
+                    : "Verde top! \(spokenKm), \(spokenHora), \(spokenLucro)."
             )
         }
         
         // PRIORIDADE 8: Busca Longa (Por Tempo > 5 min OU por Distância > maxKmBusca)
         if ride.tempoBuscaMin > settings.maxTempoBuscaMin || ride.kmBusca > settings.maxKmBusca {
             let kmBuscaStr = String(format: "%.1f", ride.kmBusca).replacingOccurrences(of: ".", with: ",")
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .rejected,
                 message: discreet ? "FORA DE META: BUSCA" : "CILADA: BUSCA LONGA",
                 detailMetrics: "Busca: \(Int(ride.tempoBuscaMin)) min (\(kmBuscaStr) km) • \(metricsSummary)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: "Recusar: busca longa de \(kmBuscaStr) quilômetros."
+                speech: "Vermelha! Busca longe, \(Int(ride.tempoBuscaMin)) minutos."
             )
         }
         
         // PRIORIDADE 9: Corrida Mixuruca (Valor Total muito baixo, ex: < R$ 7,50)
         if ride.valorTotal < settings.minValorCorrida {
             let valStr = String(format: "%.2f", ride.valorTotal).replacingOccurrences(of: ".", with: ",")
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .warning,
                 message: "🪙 VALOR BAIXO: SÓ R$ \(valStr)",
                 detailMetrics: "R$ \(ganhoKmStr)/km • \(metricsSummary)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: "Atenção: valor total baixo, apenas \(valStr) reais."
+                speech: "Amarela! Valor baixo, \(Int(ride.valorTotal)) reais."
             )
         }
         
@@ -560,70 +626,58 @@ final class RideRuleEngine {
         if isTrafficModeEnabled || effectiveVelMedia < 25.0 || (mapVerification?.hasHiddenTrafficTrap == true) {
             if effectiveGanhoHora < settings.minGanhoHoraTransito {
                 let prefix = (mapVerification?.hasHiddenTrafficTrap == true) ? "🗺️ MAPS TRÂNSITO" : "TRÂNSITO"
-                return RideVerdict(
+                return buildGiguVerdict(
                     status: .rejected,
                     message: "\(prefix): SÓ R$\(ganhoHoraStr)/h",
                     detailMetrics: "\(timeLabel) • R$ \(ganhoKmStr)/km",
-                    passengerBadge: badge,
-                    isCashPayment: ride.pagamentoEmDinheiro,
-                    speechText: "Reprovada no trânsito: apenas \(ganhoHoraStr) por hora."
+                    speech: "Vermelha no trânsito! Só \(spokenHora)."
                 )
             } else {
                 let prefix = (mapVerification?.uberOverestimatedTime == true) ? "🗺️ LIVRE NO MAPS" : "APROVADA NO TRÂNSITO"
-                return RideVerdict(
+                return buildGiguVerdict(
                     status: .approved,
                     message: prefix,
                     detailMetrics: "R$ \(ganhoHoraStr)/h | \(metricsSummary)",
-                    passengerBadge: badge,
-                    isCashPayment: ride.pagamentoEmDinheiro,
-                    speechText: "Aprovada no trânsito: \(ganhoHoraStr) por hora."
+                    speech: "Verde! Livre no trânsito, \(spokenHora), \(spokenLucro)."
                 )
             }
         }
         
         // PRIORIDADE 11: Alertas Amarelos de Rua (Embarque em Supermercado/Atacadão, Conta Nova < 15 viagens, Nota em aviso ou Ganhos Medianos)
         if let matchedMarket = findMatchingKeyword(in: ride.enderecoBusca, keywords: settings.marketPickupKeywords) {
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .warning,
                 message: "🛒 EMBARQUE: \(matchedMarket.uppercased())",
                 detailMetrics: "Possível compra/sacolas • R$ \(ganhoKmStr)/km",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: "Atenção: embarque em mercado, \(matchedMarket)."
+                speech: "Amarela! Embarque em mercado \(matchedMarket), \(spokenKm)."
             )
         }
         
         if let trips = ride.numeroViagensPassageiro, trips < settings.minViagensPassageiro {
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .warning,
                 message: "🛡️ CONTA NOVA (\(trips) VIAGENS)",
                 detailMetrics: "R$ \(ganhoKmStr)/km | \(metricsSummary)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: "Atenção: passageiro conta nova com apenas \(trips) viagens."
+                speech: "Amarela! Conta nova, só \(trips) viagens. \(spokenKm)."
             )
         }
         
         if let nota = ride.notaPassageiro, nota < settings.minNotaPassageiro {
             let notaStr = String(format: "%.2f", nota).replacingOccurrences(of: ".", with: ",")
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .warning,
                 message: "ATENÇÃO: NOTA \(notaStr)",
                 detailMetrics: "R$ \(ganhoKmStr)/km | \(metricsSummary)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: "Atenção: nota \(notaStr). \(ganhoKmStr) por quilômetro."
+                speech: "Amarela! Nota baixa, \(spokenKm)."
             )
         }
         
         if ride.ganhoKm < settings.minGanhoKmNormal || effectiveGanhoHora < settings.minGanhoHoraNormal {
-            return RideVerdict(
+            return buildGiguVerdict(
                 status: .warning,
                 message: "MEDIANA: R$\(ganhoKmStr)/km",
                 detailMetrics: "R$ \(ganhoHoraStr)/h • \(metricsSummary)",
-                passengerBadge: badge,
-                isCashPayment: ride.pagamentoEmDinheiro,
-                speechText: "Corrida mediana: \(ganhoKmStr) por quilômetro."
+                speech: "Amarela! \(spokenKm), \(spokenHora)."
             )
         }
         
@@ -632,17 +686,27 @@ final class RideRuleEngine {
             ? "🎯 BATE OS \(metaIntStr): R$\(ganhoKmStr)/km"
             : "R$ \(ganhoKmStr)/km | R$ \(ganhoHoraStr)/h"
         let normalSpeech = willHitDailyGoal
-            ? "Aprovada! Com essa corrida você bate sua meta de \(metaIntStr) reais!"
-            : "Aprovada: \(ganhoKmStr) por quilômetro, lucro \(lucroLiqStr) reais."
+            ? "Verde! Bate a meta de \(metaIntStr)! \(spokenKm), \(spokenLucro)."
+            : "Verde! \(spokenKm), \(spokenHora), \(spokenLucro)."
         
-        return RideVerdict(
+        return buildGiguVerdict(
             status: .approved,
             message: normalMsg,
             detailMetrics: metricsSummary,
-            passengerBadge: badge,
-            isCashPayment: ride.pagamentoEmDinheiro,
-            speechText: normalSpeech
+            speech: normalSpeech
         )
+    }
+    
+    /// Formata o R$/km para fala natural estilo GigU (ex: 1.85 -> "1 e 85 o K M") sem usar vírgula numérica
+    private func spokenKmRate(_ value: Double) -> String {
+        let reais = Int(value)
+        let centavos = Int(round((value - Double(reais)) * 100.0))
+        if centavos <= 0 {
+            return "\(reais) reais o K M"
+        } else if centavos < 10 {
+            return "\(reais) e zero \(centavos) o K M"
+        }
+        return "\(reais) e \(centavos) o K M"
     }
     
     // MARK: - Helpers Internos de Regex

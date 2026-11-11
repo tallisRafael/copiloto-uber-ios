@@ -1,4 +1,4 @@
-# Suíte Completa de Testes + Simulação de Probabilidade (Maringá • Sarandi • Marialva + Meta 250+)
+﻿# Suíte Completa de Testes + Simulação de Probabilidade (Maringá • Sarandi • Marialva + Meta 250+)
 $ErrorActionPreference = "Stop"
 
 function Parse-RideOCR([string]$rawText) {
@@ -306,6 +306,61 @@ Write-Host ("  • Ofertas Tocadas no Dia        : 100 chamadas") -ForegroundCol
 Write-Host ("  • Corridas Aprovadas (Filé)     : {0} aceitas | {1} ciladas bloqueadas" -f $copilotoAceitas, $copilotoRecusadas) -ForegroundColor Green
 Write-Host ("  • Tempo para Bater a Meta 250+  : {0} corridas (~{1:N1} horas de trabalho)" -f $corridasAte250, $horasAte250) -ForegroundColor Cyan
 Write-Host ("  • Lucro Liquido Medio por Hora  : R$ {0:N2}/h LIVRES (ja descontando gasolina e volta)" -f $ganhoHoraLiqCopiloto) -ForegroundColor Green
+
+Write-Host ""
+Write-Host "==================================================================" -ForegroundColor Magenta
+Write-Host "  PARTE 3: ANTI-GAGUEIRA DA VOZ (FRAMES DO OCR COM O CARD ANIMANDO)" -ForegroundColor Magenta
+Write-Host "==================================================================" -ForegroundColor Magenta
+
+# Replica a logica do SpeechManager.triggerAlertIfNeeded (trava por preco + cooldown 12s + fingerprint numerico)
+$script:lastFp = ""; $script:lastPrice = -1.0; $script:lastTime = -999.0; $script:lastStatus = "WAITING"; $script:falas = @()
+function Invoke-VoiceGate([double]$t, [double]$price, [string]$fp, [string]$status) {
+    $samePrice = ($price -gt 0) -and ([math]::Abs($price - $script:lastPrice) -lt 0.05) -and (($t - $script:lastTime) -lt 12.0)
+    $sameFp = ($fp -eq $script:lastFp)
+    $flip = ($sameFp -or $samePrice) -and ($status -ne $script:lastStatus) -and ($script:lastStatus -ne "WAITING")
+    if (($sameFp -or $samePrice) -and -not $flip) { return }
+    $script:lastFp = $fp; $script:lastPrice = $price; $script:lastTime = $t; $script:lastStatus = $status
+    $script:falas += ("t={0:N1}s R$ {1:N2} [{2}]" -f $t, $price, $status)
+}
+function Reset-VoiceGate([double]$t) {
+    if (($t - $script:lastTime) -gt 6.0) { $script:lastFp = ""; $script:lastPrice = -1.0; $script:lastStatus = "WAITING" }
+}
+function Get-Fp($p) { return ("{0:N2}_{1:N1}_{2:N0}" -f $p.ValorTotal, $p.KmTotal, $p.TempoTotal) }
+
+# Corrida 1 (R$ 20,35): 10 frames em 3,5s com o OCR lendo endereco/km diferentes enquanto o card sobe
+$frames1 = @(
+    "R$ 20,35`n4,94 (190) Verificado`n2 min (0.8 km) Av. Colombo, Zona 7`n16 minutos (10.2 km) Av. Londrina, Sarandi",
+    "R$ 20,35`n4,94 (190) Verificado`n2 min (0.8 km) Av. Colombo, Zona 7`n16 minutos (10.2 km) Av. Londrlna, Sarandi",
+    "R$ 20,35`n4,94 (190)`n2 min (0.8 km) Av Colombo Zona 7`n16 minutos (10,2 km) Av. Londrina, Sarandi",
+    "R$ 20,35`n4,94 (190) Verificado`n3 min (0.9 km) Av. Colombo, Zona 7`n16 minutos (10.2 km) Av. Londrina, Sarandi"
+)
+$t = 0.0
+for ($k = 0; $k -lt 10; $k++) {
+    $p = Parse-RideOCR $frames1[$k % $frames1.Count]
+    $v = Evaluate-Ride $p
+    Invoke-VoiceGate $t $p.ValorTotal (Get-Fp $p) $v.Status
+    $t += 0.35
+}
+# Card some por 1 frame (piscada) e volta -> NAO pode repetir
+Reset-VoiceGate $t; $t += 0.4
+$p = Parse-RideOCR $frames1[0]; $v = Evaluate-Ride $p
+Invoke-VoiceGate $t $p.ValorTotal (Get-Fp $p) $v.Status
+$falasCorrida1 = $script:falas.Count
+
+# Corrida 2 diferente (R$ 26,00 Marialva) 20s depois -> TEM que falar de novo
+$t += 20.0; Reset-VoiceGate $t
+$p = Parse-RideOCR "R$ 26,00`n4,95 (310) Verificado`n3 min (1.0 km) Av. Brasil, Centro`n21 minutos (17.0 km) Centro, Marialva"
+$v = Evaluate-Ride $p
+Invoke-VoiceGate $t $p.ValorTotal (Get-Fp $p) $v.Status
+
+foreach ($f in $script:falas) { Write-Host "       voz -> $f" -ForegroundColor Gray }
+if ($falasCorrida1 -eq 1 -and $script:falas.Count -eq 2) {
+    Write-Host "[PASS] 13. Voz falou 1x na corrida de R$ 20,35 (11 frames variando) e 1x na nova corrida de Marialva" -ForegroundColor Green
+    $passed++
+} else {
+    Write-Host ("[FAIL] 13. Anti-gagueira: esperado 1 + 1 falas, obtido {0} + {1}" -f $falasCorrida1, ($script:falas.Count - $falasCorrida1)) -ForegroundColor Red
+    $failed++
+}
 
 Write-Host "==================================================================" -ForegroundColor Cyan
 Write-Host ("  RESULTADO FINAL: {0} APROVADOS | {1} FALHAS" -f $passed, $failed) -ForegroundColor $(if ($failed -eq 0) { "Green" } else { "Red" })

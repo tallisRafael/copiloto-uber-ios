@@ -74,6 +74,9 @@ final class RideAssistantViewModel: ObservableObject {
         }
         learnedProfiles = AdaptiveLearningEngine.shared.sortedProfiles
         
+        // Pede a permissão dos Banners de Topo (estilo GigU) logo ao abrir o app
+        _ = SpeechManager.shared
+        
         pipManager.setup(with: self)
         registerDarwinNotificationObserver()
         startLocalUDPReceiver()
@@ -202,9 +205,9 @@ final class RideAssistantViewModel: ObservableObject {
                 
                 SpeechManager.shared.triggerAlertIfNeeded(
                     mode: self.audioAlertMode,
-                    status: initialVerdict.status,
-                    speechText: initialVerdict.speechText,
-                    fingerprint: extractedData.fingerprint
+                    verdict: initialVerdict,
+                    fingerprint: extractedData.fingerprint,
+                    isSimulated: isSimulated
                 )
                 
                 // Toda vez que tocar uma NOVA corrida, faz uma nova consulta AO VIVO do trânsito no Apple Maps!
@@ -301,9 +304,9 @@ final class RideAssistantViewModel: ObservableObject {
         if previousStatus != .waiting && previousStatus != verdict.status {
             SpeechManager.shared.triggerAlertIfNeeded(
                 mode: audioAlertMode,
-                status: verdict.status,
-                speechText: verdict.speechText,
-                fingerprint: extractedData.fingerprint
+                verdict: verdict,
+                fingerprint: extractedData.fingerprint,
+                isSimulated: false
             )
         }
         
