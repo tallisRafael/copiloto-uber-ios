@@ -103,12 +103,13 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
         
         switch mode {
         case .off:
+            // Modo Silencioso / Mudo: nenhum som ou fala
             break
         case .beep:
+            // Apenas o Bipe do sistema: zero voz
             playSystemBeep(for: status)
         case .voice:
-            // Toca o bipe imediato de confirmação E em seguida fala com a voz da Siri
-            playSystemBeep(for: status)
+            // Apenas a Voz da Siri: zero bipe
             if let text = verdict.speechText, !text.isEmpty {
                 speakGiguStyle(text, forceInterrupt: isSimulated)
             }
