@@ -57,6 +57,9 @@ final class RideAssistantViewModel: ObservableObject {
         }
     }
     
+    /// Indica se a captura de tela do ReplayKit está ativa enviando frames
+    @Published var isBroadcastActive: Bool = false
+    
     let ruleEngine = RideRuleEngine()
     let pipManager = PiPManager()
     
@@ -64,8 +67,25 @@ final class RideAssistantViewModel: ObservableObject {
     private var lastRecordedFingerprint: String = ""
     
     init() {
+        // Limpa falsos positivos que tenham sido gerados por cliques anteriores no Simulador
+        if !UserDefaults.standard.bool(forKey: "did_clean_sim_pollution_v2") {
+            AdaptiveLearningEngine.shared.clearAllLearnedData()
+            UserDefaults.standard.set(true, forKey: "did_clean_sim_pollution_v2")
+        }
+        learnedProfiles = AdaptiveLearningEngine.shared.sortedProfiles
+        
         pipManager.setup(with: self)
         registerDarwinNotificationObserver()
+        startLocalUDPReceiver()
+    }
+    
+    private func startLocalUDPReceiver() {
+        LocalOCRReceiver.shared.onTextReceived = { [weak self] text in
+            guard let self = self else { return }
+            self.isBroadcastActive = true
+            self.handleNewOCRText(text, isSimulated: false)
+        }
+        LocalOCRReceiver.shared.startListening()
     }
     
     deinit {
@@ -129,7 +149,7 @@ final class RideAssistantViewModel: ObservableObject {
     
     // MARK: - Processamento do OCR em 2 Estágios (1º Instantâneo + 2º Apple Maps)
     
-    func handleNewOCRText(_ text: String, simulatedMapOverride: MapTrafficVerification? = nil) {
+    func handleNewOCRText(_ text: String, simulatedMapOverride: MapTrafficVerification? = nil, isSimulated: Bool = false) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
@@ -167,7 +187,8 @@ final class RideAssistantViewModel: ObservableObject {
                 self.scheduleAutoResetTimer()
                 self.recordHistoryIfNeeded(data: extractedData, verdict: initialVerdict)
                 
-                if isNewRide && self.settings.usarAprendizadoDeMaquina {
+                // IMPORTANTE: Só treina a IA em corridas reais da rua (!isSimulated), nunca quando o motorista clica nos botões de teste!
+                if !isSimulated && isNewRide && self.settings.usarAprendizadoDeMaquina {
                     let shouldAutoEnableTraffic = AdaptiveLearningEngine.shared.recordOfferObserved(
                         ride: extractedData,
                         wasFinanciallyApproved: initialVerdict.status == .approved,
@@ -228,7 +249,11 @@ final class RideAssistantViewModel: ObservableObject {
             }
             currentVerdict = .waiting
         } else if status == "AGUARDANDO CORRIDA..." {
+            isBroadcastActive = true
             currentVerdict = .waiting
+        } else if status == "CAPTURA ENCERRADA" {
+            isBroadcastActive = false
+            currentVerdict = .systemStatus(status)
         } else {
             currentVerdict = .systemStatus(status)
         }

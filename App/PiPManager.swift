@@ -1,24 +1,28 @@
 import Foundation
 import AVKit
 import AVFoundation
+import CoreMedia
 import SwiftUI
 import UIKit
 
-/// Gerenciador responsável por criar o player "falso" (AVSampleBufferDisplayLayer),
-/// ativar a sessão de áudio em background e injetar a SwiftUI View dentro da janela flutuante do PiP.
+/// Gerenciador responsável por manter o stream de vídeo da `AVSampleBufferDisplayLayer`,
+/// ativar a sessão de áudio em background e abrir/atualizar a janela flutuante do Picture-in-Picture (PiP).
 final class PiPManager: NSObject, ObservableObject {
     
     @Published private(set) var isPiPActive: Bool = false
+    @Published private(set) var isPiPReady: Bool = false
     
-    /// Layer de vídeo sem arquivo .mp4 que mantém o Picture-in-Picture vivo
+    /// Layer de vídeo real que renderiza o card do Copiloto e sustenta o Picture-in-Picture
     let sampleBufferDisplayLayer = AVSampleBufferDisplayLayer()
     
     private var pipController: AVPictureInPictureController?
     private var hostingController: UIHostingController<PiPOverlayView>?
     private var refreshTimer: Timer?
     private weak var viewModel: RideAssistantViewModel?
+    private var possibleObservation: NSKeyValueObservation?
+    private var pendingManualStart: Bool = false
     
-    /// Cache do último buffer de vídeo renderizado da SwiftUI View para evitar `UIGraphicsImageRenderer` e `CVPixelBufferCreate` a cada tick de 1s
+    /// Cache do último buffer de vídeo renderizado da SwiftUI View
     private var cachedRenderedImage: UIImage?
     private var cachedPixelBuffer: CVPixelBuffer?
     private var cachedFormatDescription: CMVideoFormatDescription?
@@ -26,12 +30,14 @@ final class PiPManager: NSObject, ObservableObject {
     
     deinit {
         refreshTimer?.invalidate()
+        possibleObservation?.invalidate()
     }
     
-    /// Configura a sessão de áudio e inicializa o AVPictureInPictureController
+    /// Configura a sessão de áudio, o relógio CMTimebase e o loop de vídeo do PiP
     func setup(with viewModel: RideAssistantViewModel) {
         self.viewModel = viewModel
         configureAudioSessionForPiP()
+        configureTimebaseIfNeeded()
         
         let overlayView = PiPOverlayView(viewModel: viewModel)
         let hosting = UIHostingController(rootView: overlayView)
@@ -39,42 +45,107 @@ final class PiPManager: NSObject, ObservableObject {
         hosting.view.frame = CGRect(x: 0, y: 0, width: 380, height: 110)
         self.hostingController = hosting
         
-        // Alimenta o primeiro frame no buffer para que o PiP fique pronto imediatamente
+        // Alimenta o primeiro frame imediatamente
         enqueueRenderedSwiftUIFrame(forceRedraw: true)
         
-        guard AVPictureInPictureController.isPictureInPictureSupported() else {
-            print("[PiPManager] Picture-in-Picture não é suportado neste dispositivo.")
-            return
-        }
+        // Inicializa o controller (e recria caso a view entre na janela depois)
+        initializePiPControllerIfNeeded()
         
-        let contentSource = AVPictureInPictureController.ContentSource(
-            sampleBufferDisplayLayer: sampleBufferDisplayLayer,
-            playbackDelegate: self
-        )
-        
-        let controller = AVPictureInPictureController(contentSource: contentSource)
-        controller.delegate = self
-        // Começa o PiP automaticamente quando o motorista sai do nosso app para ir para a Uber
-        controller.canStartPictureInPictureAutomaticallyFromInline = true
-        // Oculta controles de avançar/retroceder 15s
-        controller.requiresLinearPlayback = true
-        self.pipController = controller
-        
-        // Mantém o stream de vídeo vivo enviando o buffer em cache a cada 1.0s (sem custo de UIGraphicsImageRenderer)
+        // Mantém o stream vivo enviando frames constantes (necessário para o iOS habilitar o PiP)
         refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.enqueueRenderedSwiftUIFrame(forceRedraw: false)
         }
     }
     
-    /// Liga ou desliga manualmente a janela flutuante
+    /// Chamado pela `SampleBufferLayerHostView` assim que a layer entra na `UIWindow` real do iPhone
+    func notifyLayerMovedToWindow() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.configureAudioSessionForPiP()
+            self.configureTimebaseIfNeeded()
+            self.enqueueRenderedSwiftUIFrame(forceRedraw: true)
+            self.initializePiPControllerIfNeeded()
+        }
+    }
+    
+    private func configureTimebaseIfNeeded() {
+        if sampleBufferDisplayLayer.controlTimebase == nil {
+            var timebase: CMTimebase?
+            CMTimebaseCreateWithSourceClock(
+                allocator: kCFAllocatorDefault,
+                sourceClock: CMClockGetHostTimeClock(),
+                timebaseOut: &timebase
+            )
+            if let tb = timebase {
+                CMTimebaseSetTime(tb, time: CMClockGetTime(CMClockGetHostTimeClock()))
+                CMTimebaseSetRate(tb, rate: 1.0)
+                sampleBufferDisplayLayer.controlTimebase = tb
+            }
+        } else if let tb = sampleBufferDisplayLayer.controlTimebase {
+            CMTimebaseSetRate(tb, rate: 1.0)
+        }
+    }
+    
+    private func initializePiPControllerIfNeeded() {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        
+        if pipController == nil {
+            let contentSource = AVPictureInPictureController.ContentSource(
+                sampleBufferDisplayLayer: sampleBufferDisplayLayer,
+                playbackDelegate: self
+            )
+            let controller = AVPictureInPictureController(contentSource: contentSource)
+            controller.delegate = self
+            controller.canStartPictureInPictureAutomaticallyFromInline = true
+            controller.requiresLinearPlayback = true
+            self.pipController = controller
+            
+            possibleObservation = controller.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] ctrl, _ in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.isPiPReady = ctrl.isPictureInPicturePossible
+                    if ctrl.isPictureInPicturePossible && self.pendingManualStart {
+                        self.pendingManualStart = false
+                        ctrl.startPictureInPicture()
+                    }
+                }
+            }
+        }
+        
+        pipController?.invalidatePlaybackState()
+    }
+    
+    /// Liga ou desliga manualmente a janela flutuante quando o motorista toca no botão
     func togglePiP() {
+        configureAudioSessionForPiP()
+        configureTimebaseIfNeeded()
+        enqueueRenderedSwiftUIFrame(forceRedraw: true)
+        initializePiPControllerIfNeeded()
+        
         guard let pipController = pipController else { return }
+        
         if pipController.isPictureInPictureActive {
+            pendingManualStart = false
             pipController.stopPictureInPicture()
-        } else {
-            enqueueRenderedSwiftUIFrame(forceRedraw: true)
+        } else if pipController.isPictureInPicturePossible {
+            pendingManualStart = false
             pipController.startPictureInPicture()
+        } else {
+            // Caso o iOS precise de alguns frames extras para liberar o PiP, agenda abertura imediata
+            pendingManualStart = true
+            pipController.invalidatePlaybackState()
+            for delay in [0.15, 0.35, 0.65] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self = self, let ctrl = self.pipController else { return }
+                    self.enqueueRenderedSwiftUIFrame(forceRedraw: true)
+                    ctrl.invalidatePlaybackState()
+                    if self.pendingManualStart && ctrl.isPictureInPicturePossible {
+                        self.pendingManualStart = false
+                        ctrl.startPictureInPicture()
+                    }
+                }
+            }
         }
     }
     
@@ -86,6 +157,7 @@ final class PiPManager: NSObject, ObservableObject {
             self.hostingController?.view.setNeedsLayout()
             self.hostingController?.view.layoutIfNeeded()
             self.enqueueRenderedSwiftUIFrame(forceRedraw: true)
+            self.pipController?.invalidatePlaybackState()
         }
     }
     
@@ -94,7 +166,6 @@ final class PiPManager: NSObject, ObservableObject {
     private func configureAudioSessionForPiP() {
         do {
             let session = AVAudioSession.sharedInstance()
-            // .playback com .mixWithOthers permite o PiP e o alerta de voz funcionarem sem interromper o toque da Uber ou Spotify
             try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
@@ -102,10 +173,8 @@ final class PiPManager: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Geração Otimizada de CMSampleBuffer com Cache de PixelBuffer (Zero Alocação Ociosa)
+    // MARK: - Geração de CMSampleBuffer com DisplayImmediately
     
-    /// Renderiza a `PiPOverlayView` em um `CMSampleBuffer` e envia para a `AVSampleBufferDisplayLayer`.
-    /// Só executa `UIGraphicsImageRenderer` e `CVPixelBufferCreate` quando `forceRedraw` ou `needsImageRedraw` for `true`.
     private func enqueueRenderedSwiftUIFrame(forceRedraw: Bool) {
         if forceRedraw || needsImageRedraw || cachedPixelBuffer == nil || cachedFormatDescription == nil {
             guard let hostingView = hostingController?.view else { return }
@@ -172,9 +241,6 @@ final class PiPManager: NSObject, ObservableObject {
             bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
         ) else { return nil }
         
-        // Alinha o sistema de coordenadas do CoreGraphics com a orientação vertical do UIKit
-        context.translateBy(x: 0, y: CGFloat(height))
-        context.scaleBy(x: 1.0, y: -1.0)
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         
         var formatDescription: CMVideoFormatDescription?
@@ -188,9 +254,16 @@ final class PiPManager: NSObject, ObservableObject {
     }
     
     private func wrapInSampleBuffer(buffer: CVPixelBuffer, formatDesc: CMVideoFormatDescription) -> CMSampleBuffer? {
+        let nowTime: CMTime = {
+            if let tb = sampleBufferDisplayLayer.controlTimebase {
+                return CMTimebaseGetTime(tb)
+            }
+            return CMClockGetTime(CMClockGetHostTimeClock())
+        }()
+        
         var timingInfo = CMSampleTimingInfo(
-            duration: CMTime(value: 1, timescale: 30),
-            presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()),
+            duration: CMTime(value: 1, timescale: 2),
+            presentationTimeStamp: nowTime,
             decodeTimeStamp: .invalid
         )
         
@@ -206,16 +279,21 @@ final class PiPManager: NSObject, ObservableObject {
             sampleBufferOut: &sampleBuffer
         )
         
+        if let sb = sampleBuffer,
+           let attachments = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true) as? [NSMutableDictionary],
+           let first = attachments.first {
+            first[kCMSampleAttachmentKey_DisplayImmediately] = kCFBooleanTrue
+        }
+        
         return sampleBuffer
     }
 }
 
-// MARK: - AVPictureInPictureControllerDelegate (Injeção da View na Janela do PiP)
+// MARK: - AVPictureInPictureControllerDelegate
 
 extension PiPManager: AVPictureInPictureControllerDelegate {
     
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        // Técnica de Injeção de UIView na janela flutuante (PGHostedWindow) compatível com UIWindowScene (iOS 15+)
         DispatchQueue.main.async { [weak self] in
             guard let self = self,
                   let hostingView = self.hostingController?.view else {
@@ -228,7 +306,8 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
             
             guard let pipWindow = allWindows.first(where: {
                 String(describing: type(of: $0)).contains("PGHostedWindow")
-            }) ?? allWindows.first else {
+            }) else {
+                // Caso o iOS renderize diretamente o buffer de vídeo da sampleBufferDisplayLayer, não adiciona sobre a janela principal do app!
                 return
             }
             
@@ -252,8 +331,6 @@ extension PiPManager: AVPictureInPictureControllerDelegate {
 extension PiPManager: AVPictureInPictureSampleBufferPlaybackDelegate {
     
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool) {
-        // TRUQUE DE USABILIDADE: Quando o motorista toca no botão Play/Pause nativo do PiP
-        // enquanto está no app da Uber, alternamos o Modo Trânsito sem precisar voltar ao nosso app!
         DispatchQueue.main.async { [weak self] in
             self?.viewModel?.isTrafficModeEnabled.toggle()
             self?.refreshNow()
@@ -261,8 +338,7 @@ extension PiPManager: AVPictureInPictureSampleBufferPlaybackDelegate {
     }
     
     func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
-        // Retorna um intervalo infinito (live stream) para que a barra de tempo não expire
-        return CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
+        return CMTimeRange(start: .zero, duration: CMTime(seconds: 86400, preferredTimescale: 600))
     }
     
     func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {

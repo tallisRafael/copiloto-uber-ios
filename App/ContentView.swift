@@ -1,38 +1,60 @@
 import SwiftUI
 import AVKit
+import UIKit
 
-/// View container que hospeda a `AVSampleBufferDisplayLayer` na tela principal do app
-/// (necessário no iOS para que o sistema saiba de onde ancorar e iniciar o Picture-in-Picture).
+/// UIView customizada que avisa o `PiPManager` assim que entra na `UIWindow` real do iPhone,
+/// garantindo que o `AVPictureInPictureController` habilite o PiP imediatamente.
+final class LayerContainerUIView: UIView {
+    var displayLayer: AVSampleBufferDisplayLayer?
+    var onMovedToWindow: (() -> Void)?
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        displayLayer?.frame = bounds
+    }
+    
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+            onMovedToWindow?()
+        }
+    }
+}
+
+/// Hospeda a `AVSampleBufferDisplayLayer` visível na tela principal para ancorar o Picture-in-Picture
 struct SampleBufferLayerHostView: UIViewRepresentable {
     let displayLayer: AVSampleBufferDisplayLayer
+    let onAttached: () -> Void
     
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+    func makeUIView(context: Context) -> LayerContainerUIView {
+        let view = LayerContainerUIView()
+        view.backgroundColor = .clear
         displayLayer.frame = CGRect(x: 0, y: 0, width: 380, height: 110)
-        displayLayer.videoGravity = .resizeAspect
+        displayLayer.videoGravity = .resizeAspectFill
+        view.displayLayer = displayLayer
+        view.onMovedToWindow = onAttached
         view.layer.addSublayer(displayLayer)
         return view
     }
     
-    func updateUIView(_ uiView: UIView, context: Context) {
+    func updateUIView(_ uiView: LayerContainerUIView, context: Context) {
         displayLayer.frame = uiView.bounds
     }
 }
 
-/// Abas da tela principal para organizar Simulador, Meta/Histórico, IA/Maps e Configurações
-private enum DashboardTab: String, CaseIterable, Identifiable {
-    case simulator = "Simulador"
-    case history = "Meta & Histórico"
-    case learning = "IA & Maps"
-    case settings = "Ajustes"
-    
-    var id: String { rawValue }
+/// Abas principais na barra inferior nativa do iOS (`TabView`)
+private enum MainTab: Hashable {
+    case cockpit
+    case goalAndHistory
+    case simulator
+    case settingsAndAI
 }
 
-/// Tela principal do aplicativo auxiliar do motorista
+/// Tela principal com Design Automotivo Dark Mode e Navegação Nativa em 4 Abas
 struct ContentView: View {
     @StateObject private var viewModel = RideAssistantViewModel()
-    @State private var selectedTab: DashboardTab = .simulator
+    @State private var activeTab: MainTab = .cockpit
+    @State private var broadcastTriggerCount: Int = 0
     
     @State private var newDangerKeyword: String = ""
     @State private var newBlacklistKeyword: String = ""
@@ -40,751 +62,920 @@ struct ContentView: View {
     @State private var newHomeKeyword: String = ""
     
     var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(spacing: 16) {
-                    
-                    // 1. Preview em Tempo Real do Card do PiP + Ações Rápidas da Corrida Atual
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("PRÉVIA DA JANELA FLUTUANTE (PiP)")
-                                .font(.caption.bold())
+        TabView(selection: $activeTab) {
+            // ABA 1: COCKPIT DE RUA (OPERAÇÃO PRINCIPAL)
+            NavigationView {
+                cockpitTabView
+                    .navigationBarHidden(true)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("Copiloto", systemImage: "car.circle.fill")
+            }
+            .tag(MainTab.cockpit)
+            
+            // ABA 2: META 250+ & HISTÓRICO DE CORRIDAS
+            NavigationView {
+                goalAndHistoryTabView
+                    .navigationTitle("Meta 250+ & Turno")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("Meta 250+", systemImage: "flame.fill")
+            }
+            .tag(MainTab.goalAndHistory)
+            
+            // ABA 3: SIMULADOR DE ROTAS (MARINGÁ • SARANDI • MARIALVA)
+            NavigationView {
+                simulatorTabView
+                    .navigationTitle("Simulador de Rotas")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("Simulador", systemImage: "bolt.horizontal.circle.fill")
+            }
+            .tag(MainTab.simulator)
+            
+            // ABA 4: AJUSTES, LISTAS E IA LOCAL
+            NavigationView {
+                settingsAndAITabView
+                    .navigationTitle("Ajustes & IA")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("Ajustes", systemImage: "slider.horizontal.3")
+            }
+            .tag(MainTab.settingsAndAI)
+        }
+        .preferredColorScheme(.dark)
+        .accentColor(.cyan)
+    }
+    
+    // MARK: - ABA 1: Cockpit Principal (Design Automotivo Limpo e Direto)
+    
+    private var cockpitTabView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                // Cabeçalho Compacto do Cockpit
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("COPILOTO UBER")
+                            .font(.system(size: 20, weight: .black, design: .rounded))
+                            .foregroundColor(.white)
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(viewModel.isBroadcastActive ? Color.green : Color.orange)
+                                .frame(width: 8, height: 8)
+                            Text(viewModel.isBroadcastActive ? "Leitor de Tela Ativo" : "Passo 1: Ligue o Leitor de Tela")
+                                .font(.caption2.bold())
                                 .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            if viewModel.currentVerdict.status != .waiting {
-                                Button {
-                                    viewModel.toggleAcceptCurrentRide()
-                                } label: {
-                                    Label(
-                                        viewModel.isCurrentRideAccepted ? "Corrida Contabilizada" : "Aceitei Corrida",
-                                        systemImage: viewModel.isCurrentRideAccepted ? "checkmark.circle.fill" : "plus.circle"
-                                    )
-                                    .font(.caption.bold())
-                                    .foregroundColor(viewModel.isCurrentRideAccepted ? .green : .blue)
-                                }
-                                
-                                Text("•")
-                                    .foregroundColor(.secondary)
-                                
-                                Button("Limpar") {
-                                    viewModel.handleNewOCRText("AGUARDANDO CORRIDA...")
-                                }
-                                .font(.caption.bold())
-                                .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        ZStack {
-                            SampleBufferLayerHostView(displayLayer: viewModel.pipManager.sampleBufferDisplayLayer)
-                                .frame(width: 380, height: 110)
-                                .opacity(0.01)
-                            
-                            PiPOverlayView(viewModel: viewModel)
-                                .cornerRadius(14)
-                                .shadow(radius: 6)
                         }
                     }
                     
-                    // 2. Controles Rápidos de Operação
-                    VStack(spacing: 10) {
-                        HStack(spacing: 10) {
-                            Toggle(isOn: $viewModel.isTrafficModeEnabled) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label("Trânsito/Chuva", systemImage: "cloud.heavyrain.fill")
-                                        .font(.caption.bold())
-                                        .foregroundColor(.orange)
-                                    Text(formatCurrency(viewModel.settings.minGanhoHoraTransito) + "/h")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .padding(10)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(10)
-                            
-                            Toggle(isOn: $viewModel.isGoingHomeModeEnabled) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label("Rumo a Casa", systemImage: "house.fill")
-                                        .font(.caption.bold())
-                                        .foregroundColor(.blue)
-                                    Text("Priorizar Maringá")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .padding(10)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(10)
-                        }
-                        
-                        HStack(spacing: 10) {
-                            Toggle(isOn: $viewModel.settings.modoDiscretoPassageiro) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label("Modo Discreto", systemImage: "eye.slash.fill")
-                                        .font(.caption.bold())
-                                        .foregroundColor(.purple)
-                                    Text("Passageiro a bordo")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .padding(10)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(10)
-                            
-                            Toggle(isOn: $viewModel.isPausedForBreak) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label("Pausa / Café", systemImage: "cup.and.saucer.fill")
-                                        .font(.caption.bold())
-                                        .foregroundColor(.brown)
-                                    Text("Pausar treino IA")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .padding(10)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(10)
-                        }
-                        
-                        Toggle(isOn: $viewModel.settings.recusarCorridasDinheiro) {
-                            HStack {
-                                Image(systemName: "banknote.fill")
-                                    .foregroundColor(.green)
-                                VStack(alignment: .leading) {
-                                    Text("Bloquear Pagamento em Dinheiro (Modo Noturno)")
-                                        .font(.caption.bold())
-                                    Text("Reprova automaticamente chamadas em espécie/troco")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        .padding(10)
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(10)
-                        
-                        HStack {
-                            Label("Alerta:", systemImage: viewModel.audioAlertMode.iconName)
+                    Spacer()
+                    
+                    // Mini Pílula da Meta 250+ (Toque leva para a aba Meta 250+)
+                    Button {
+                        activeTab = .goalAndHistory
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: viewModel.isMetaDiariaBatida ? "trophy.fill" : "flame.fill")
+                                .foregroundColor(viewModel.isMetaDiariaBatida ? .mint : .orange)
                                 .font(.caption.bold())
-                            Spacer()
-                            Picker("Modo de Áudio", selection: $viewModel.audioAlertMode) {
-                                ForEach(AudioAlertMode.allCases) { mode in
-                                    Text(mode.rawValue).tag(mode)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(maxWidth: 240)
-                        }
-                        .padding(10)
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(10)
-                        
-                        HStack(spacing: 14) {
-                            VStack {
-                                BroadcastPickerRepresentable(
-                                    extensionBundleIdentifier: "com.seuapp.uberhelper.BroadcastExtension"
-                                )
-                                .frame(width: 48, height: 48)
-                                
-                                Text("1. Iniciar Captura")
-                                    .font(.caption.bold())
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(12)
-                            
-                            Button {
-                                viewModel.pipManager.togglePiP()
-                            } label: {
-                                VStack(spacing: 6) {
-                                    Image(systemName: viewModel.pipManager.isPiPActive ? "pip.exit" : "pip.enter")
-                                        .font(.system(size: 24))
-                                    Text(viewModel.pipManager.isPiPActive ? "Fechar Janela PiP" : "2. Ativar Janela PiP")
-                                        .font(.caption.bold())
-                                }
-                                .frame(maxWidth: .infinity, minHeight: 72)
-                                .background(viewModel.pipManager.isPiPActive ? Color.green : Color.blue)
+                            Text("\(formatCurrency(viewModel.totalLucroLiquidoAceito)) / R$ \(Int(viewModel.settings.metaDiariaLiquida))+")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
-                                .cornerRadius(12)
-                            }
                         }
-                    }
-                    
-                    // 3. Seletor de Abas
-                    Picker("Seção", selection: $selectedTab) {
-                        ForEach(DashboardTab.allCases) { tab in
-                            Text(tab.rawValue).tag(tab)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    
-                    switch selectedTab {
-                    case .simulator:
-                        simulatorSection
-                    case .history:
-                        historyAndGoalSection
-                    case .learning:
-                        learningAndMapsSection
-                    case .settings:
-                        settingsSection
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(20)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        )
                     }
                 }
-                .padding()
-            }
-            .navigationTitle("Copiloto Uber iOS")
-        }
-    }
-    
-    // MARK: - Seção 1: Simulador OCR (Focado em Maringá, Sarandi e Marialva)
-    
-    private var simulatorSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("SIMULADOR DE ROTAS REAIS (MARINGÁ • SARANDI • MARIALVA)")
-                .font(.caption.bold())
-                .foregroundColor(.secondary)
-            
-            Button("🟢 Maringá -> Maringá (Tiro Curto Z7 -> Centro: R$ 12,91)") {
-                let sampleOCR = """
-                R$ 12,91
-                Est. de R$3,49/km
-                4,97 (254) Verificado
-                2 min (0.4 km) Av. Maringá, Zona 7
-                9 minutos (3.3 km) Av. Brasil, Centro
-                """
-                viewModel.handleNewOCRText(sampleOCR)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.green)
-            
-            Button("🟢 Maringá -> Sarandi (Boa: R$ 20,35 | 11 km -> Fica/Toca em Sarandi)") {
-                let mgaSarandiGood = """
-                R$ 20,35
-                4,94 (190) Verificado
-                2 min (0.8 km) Av. Colombo, Zona 7
-                16 minutos (10.2 km) Av. Londrina, Sarandi
-                """
-                viewModel.handleNewOCRText(mgaSarandiGood)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.green)
-            
-            Button("🔵 Sarandi -> Maringá (Voltando p/ Base Maringá: R$ 16,50)") {
-                let sarandiToMga = """
-                R$ 16,50
-                4,92 (140) Verificado
-                2 min (0.7 km) Av. Maringá, Sarandi
-                16 minutos (10.3 km) Av. Brasil, Zona 1, Maringá
-                """
-                viewModel.handleNewOCRText(sarandiToMga)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.blue)
-            
-            Button("🔴 Maringá -> Marialva (Comum Fraca R$ 26,00 -> Cobra Volta Vazia!)") {
-                let marialvaWeak = """
-                R$ 26,00
-                4,95 (310) Verificado
-                3 min (1.0 km) Av. Brasil, Centro
-                21 minutos (17.0 km) Centro, Marialva
-                """
-                viewModel.handleNewOCRText(marialvaWeak)
-            }
-            .buttonStyle(.bordered)
-            .tint(.red)
-            
-            Button("🏆 Maringá -> Marialva (Valor BOM DE FATO no Dinâmico: R$ 42,00)") {
-                let marialvaTop = """
-                R$ 42,00
-                4,98 (420) Verificado
-                3 min (1.0 km) Av. Brasil, Centro
-                21 minutos (17.0 km) Centro, Marialva
-                """
-                viewModel.handleNewOCRText(marialvaTop)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.teal)
-            
-            Button("🛒 Alerta de Embarque em Mercado (Atacadão / Compras)") {
-                let marketOCR = """
-                R$ 10,50
-                4,91 (110) Verificado
-                2 min (0.6 km) Atacadão, Av. Colombo
-                9 minutos (3.8 km) Jardim Alvorada
-                """
-                viewModel.handleNewOCRText(marketOCR)
-            }
-            .buttonStyle(.bordered)
-            .tint(.orange)
-            
-            Button("🛡️ Alerta de Conta Nova / Suspeita (★ 5,00 mas só 4 viagens!)") {
-                let newAccountOCR = """
-                R$ 12,00
-                5,00 (4)
-                2 min (0.5 km) Zona 5
-                9 minutos (4.0 km) Jardim América
-                """
-                viewModel.handleNewOCRText(newAccountOCR)
-            }
-            .buttonStyle(.bordered)
-            .tint(.orange)
-            
-            Button("🗺️ Apple Maps: Uber exagerou (20m na Uber -> 6m livres no Maps)") {
-                let overOCR = """
-                R$ 10,00
-                4,96 (210) Verificado
-                2 min (1.0 km) Av. Brasil, Centro
-                18 minutos (1.0 km) Av. São Paulo, Zona 1
-                """
-                let mapOverride = MapTrafficVerification(
-                    appleMapsTotalMinutes: 6.0,
-                    appleMapsTotalKm: 2.0,
-                    minutesDifferenceFromUber: -14.0
-                )
-                viewModel.handleNewOCRText(overOCR, simulatedMapOverride: mapOverride)
-            }
-            .buttonStyle(.bordered)
-            .tint(.teal)
-            
-            Button("🔴 Perigo Manual: Zona Proibida (Vila Pedreira)") {
-                let dangerOCR = """
-                R$ 14,00
-                4,89 (42)
-                2 min (0.5 km) Av. Brasil
-                7 minutos (2.5 km) Rua das Pedras, Vila Pedreira
-                """
-                viewModel.handleNewOCRText(dangerOCR)
-            }
-            .buttonStyle(.bordered)
-            .tint(.red)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
-    }
-    
-    // MARK: - Seção 2: Termômetro da Meta Diária & Histórico da Sessão
-    
-    private var historyAndGoalSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label(
-                        viewModel.isMetaDiariaBatida
-                            ? "🔥 MODO 250+ ATIVO (META BASE BATIDA!)"
-                            : "TERMÔMETRO DA META DIÁRIA (250+)",
-                        systemImage: viewModel.isMetaDiariaBatida ? "trophy.fill" : "flame.fill"
-                    )
-                    .font(.caption.bold())
-                    .foregroundColor(viewModel.isMetaDiariaBatida ? .mint : .orange)
-                    
-                    Spacer()
-                    
-                    Text("\(viewModel.percentualRealMetaDiaria)%")
-                        .font(.caption.bold())
-                        .foregroundColor(.green)
-                }
+                .padding(.top, 6)
                 
-                ProgressView(value: viewModel.progressoMetaDiaria)
-                    .tint(viewModel.isMetaDiariaBatida ? .mint : .green)
-                
-                HStack {
-                    Text("Lucro Líquido: \(formatCurrency(viewModel.totalLucroLiquidoAceito))")
-                        .font(.subheadline.bold())
-                        .foregroundColor(.green)
-                    Spacer()
-                    if viewModel.isMetaDiariaBatida {
-                        Text("Bônus 250+: +\(formatCurrency(viewModel.valorExcedenteMetaDiaria))")
-                            .font(.caption.bold())
-                            .foregroundColor(.mint)
-                    } else {
-                        Text("Faltam \(formatCurrency(viewModel.faltaParaMetaDiaria)) p/ \(formatCurrency(viewModel.settings.metaDiariaLiquida))")
-                            .font(.caption)
+                // Visor Ao Vivo (Player Real + Overlay do Semáforo)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("VISOR EM TEMPO REAL (PiP)", systemImage: "viewfinder")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
                             .foregroundColor(.secondary)
-                    }
-                }
-                
-                Divider()
-                
-                HStack {
-                    summaryStat(title: "Bruto Aceito", value: formatCurrency(viewModel.totalBrutoAceito))
-                    Spacer()
-                    summaryStat(title: "Combustível/KM", value: "- " + formatCurrency(viewModel.totalCustoCombustivelAceito))
-                    Spacer()
-                    summaryStat(title: "Distância", value: String(format: "%.1f km", viewModel.totalKmAceito).replacingOccurrences(of: ".", with: ","))
-                }
-            }
-            .padding(12)
-            .background(Color(.systemBackground))
-            .cornerRadius(10)
-            
-            HStack {
-                Text("OFERTAS RECEBIDAS (\(viewModel.rideHistory.count))")
-                    .font(.caption.bold())
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                if !viewModel.rideHistory.isEmpty {
-                    Button("Limpar Histórico", role: .destructive) {
-                        viewModel.clearHistory()
-                    }
-                    .font(.caption.bold())
-                }
-            }
-            
-            if viewModel.rideHistory.isEmpty {
-                Text("Nenhuma corrida analisada nesta sessão ainda.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 8)
-            } else {
-                ForEach(viewModel.rideHistory) { item in
-                    let lucroItem = item.data.lucroLiquido(custoPorKm: viewModel.settings.custoPorKm)
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(item.verdict.backgroundColor)
-                            .frame(width: 12, height: 12)
                         
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack {
-                                Text(item.verdict.message)
-                                    .font(.subheadline.bold())
-                                Spacer()
-                                if let badge = item.verdict.passengerBadge {
-                                    Text(badge)
-                                        .font(.caption2.bold())
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color(.tertiarySystemBackground))
-                                        .cornerRadius(4)
-                                }
+                        Spacer()
+                        
+                        if viewModel.currentVerdict.status != .waiting {
+                            Button {
+                                viewModel.toggleAcceptCurrentRide()
+                            } label: {
+                                Label(
+                                    viewModel.isCurrentRideAccepted ? "Contabilizada" : "Marcar Aceita",
+                                    systemImage: viewModel.isCurrentRideAccepted ? "checkmark.circle.fill" : "plus.circle.fill"
+                                )
+                                .font(.caption2.bold())
+                                .foregroundColor(viewModel.isCurrentRideAccepted ? .green : .cyan)
                             }
                             
-                            Text("Bruto: \(formatCurrency(item.data.valorTotal)) • Líquido: \(formatCurrency(lucroItem))")
-                                .font(.caption.bold())
-                                .foregroundColor(.primary)
+                            Text("•")
+                                .foregroundColor(.secondary)
                             
-                            Text("Destino: \(item.data.enderecoDestino)")
+                            Button("Limpar") {
+                                viewModel.handleNewOCRText("AGUARDANDO CORRIDA...", isSimulated: true)
+                            }
+                            .font(.caption2.bold())
+                            .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    ZStack {
+                        // A layer de vídeo fica visível (opacity 1.0) atrás do overlay para que o iOS libere o PiP na hora!
+                        SampleBufferLayerHostView(
+                            displayLayer: viewModel.pipManager.sampleBufferDisplayLayer,
+                            onAttached: {
+                                viewModel.pipManager.notifyLayerMovedToWindow()
+                            }
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 110)
+                        .cornerRadius(16)
+                        
+                        PiPOverlayView(viewModel: viewModel)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 110)
+                            .cornerRadius(16)
+                            .allowsHitTesting(false)
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(viewModel.currentVerdict.backgroundColor.opacity(0.85), lineWidth: 2)
+                    )
+                    .shadow(color: viewModel.currentVerdict.backgroundColor.opacity(0.35), radius: 10, x: 0, y: 4)
+                }
+                
+                // 2 Botões Principais de Partida (Grandes, Modernos e 100% Responsivos)
+                HStack(spacing: 12) {
+                    // Botão 1: Iniciar Captura de Tela ReplayKit
+                    Button {
+                        broadcastTriggerCount += 1
+                    } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.red.opacity(0.22))
+                                    .frame(width: 40, height: 40)
+                                Image(systemName: viewModel.isBroadcastActive ? "record.circle.fill" : "dot.radiowaves.left.and.right")
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundColor(.red)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("PASSO 1")
+                                    .font(.system(size: 10, weight: .black, design: .rounded))
+                                    .foregroundColor(.red)
+                                Text(viewModel.isBroadcastActive ? "Captura Ativa" : "Iniciar Captura")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, minHeight: 68)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(red: 0.18, green: 0.08, blue: 0.10), Color(red: 0.12, green: 0.12, blue: 0.14)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.red.opacity(0.55), lineWidth: 1.5)
+                        )
+                    }
+                    .background(
+                        BroadcastPickerRepresentable(triggerId: broadcastTriggerCount)
+                            .frame(width: 1, height: 1)
+                            .opacity(0.01)
+                            .allowsHitTesting(false)
+                    )
+                    
+                    // Botão 2: Abrir / Fechar Janela Flutuante (PiP)
+                    Button {
+                        viewModel.pipManager.togglePiP()
+                    } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill((viewModel.pipManager.isPiPActive ? Color.green : Color.cyan).opacity(0.22))
+                                    .frame(width: 40, height: 40)
+                                Image(systemName: viewModel.pipManager.isPiPActive ? "pip.exit" : "pip.enter")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(viewModel.pipManager.isPiPActive ? .green : .cyan)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("PASSO 2")
+                                    .font(.system(size: 10, weight: .black, design: .rounded))
+                                    .foregroundColor(viewModel.pipManager.isPiPActive ? .green : .cyan)
+                                Text(viewModel.pipManager.isPiPActive ? "PiP Flutuando" : "Ativar Janela PiP")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, minHeight: 68)
+                        .background(
+                            LinearGradient(
+                                colors: viewModel.pipManager.isPiPActive
+                                    ? [Color(red: 0.06, green: 0.24, blue: 0.14), Color(red: 0.10, green: 0.14, blue: 0.12)]
+                                    : [Color(red: 0.06, green: 0.18, blue: 0.28), Color(red: 0.10, green: 0.12, blue: 0.16)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke((viewModel.pipManager.isPiPActive ? Color.green : Color.cyan).opacity(0.65), lineWidth: 1.5)
+                        )
+                    }
+                }
+                
+                // Grid 2x2 de Modos Rápidos (Botões de Toque Inteiro - Sem texto quebrado!)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("MODOS DE RUA (TOQUE PARA ATIVAR)")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .foregroundColor(.secondary)
+                    
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                        cockpitModeButton(
+                            title: "Trânsito / Chuva",
+                            subtitle: "Exige R$ \(Int(viewModel.settings.minGanhoHoraTransito))/h",
+                            icon: "cloud.heavyrain.fill",
+                            activeColor: .orange,
+                            isOn: $viewModel.isTrafficModeEnabled
+                        )
+                        
+                        cockpitModeButton(
+                            title: "Rumo a Casa",
+                            subtitle: "Prioriza Maringá",
+                            icon: "house.fill",
+                            activeColor: .blue,
+                            isOn: $viewModel.isGoingHomeModeEnabled
+                        )
+                        
+                        cockpitModeButton(
+                            title: "Modo Discreto",
+                            subtitle: "Passageiro a bordo",
+                            icon: "eye.slash.fill",
+                            activeColor: .purple,
+                            isOn: $viewModel.settings.modoDiscretoPassageiro
+                        )
+                        
+                        cockpitModeButton(
+                            title: "Sem Dinheiro",
+                            subtitle: "Bloqueia espécie",
+                            icon: "banknote.fill",
+                            activeColor: .green,
+                            isOn: $viewModel.settings.recusarCorridasDinheiro
+                        )
+                    }
+                }
+                
+                // Seletor de Alerta Sonoro em 3 Botões Limpos (Sem texto cortado!)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("AVISO SONORO NO FONE / CARRO")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .foregroundColor(.secondary)
+                    
+                    HStack(spacing: 8) {
+                        ForEach(AudioAlertMode.allCases) { mode in
+                            let isSelected = (viewModel.audioAlertMode == mode)
+                            Button {
+                                viewModel.audioAlertMode = mode
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: mode.iconName)
+                                        .font(.system(size: 13, weight: .bold))
+                                    Text(mode == .beep ? "Bipe" : (mode == .voice ? "Voz Falada" : "Mudo"))
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(isSelected ? Color.cyan.opacity(0.22) : Color(.secondarySystemBackground))
+                                .foregroundColor(isSelected ? .cyan : .secondary)
+                                .cornerRadius(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(isSelected ? Color.cyan : Color.clear, lineWidth: 1.5)
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                // Card de Pausa / Café compacto
+                Button {
+                    viewModel.isPausedForBreak.toggle()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "cup.and.saucer.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(viewModel.isPausedForBreak ? .yellow : .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(viewModel.isPausedForBreak ? "MODO PAUSA / CAFÉ ATIVO" : "Modo Pausa / Abastecimento")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                            Text("Pausa o treino da IA enquanto você abastece ou descansa")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
-                                .lineLimit(1)
                         }
-                        
-                        Button {
-                            viewModel.toggleAccepted(for: item.id)
-                        } label: {
-                            VStack(spacing: 2) {
-                                Image(systemName: item.isAccepted ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 20))
-                                Text(item.isAccepted ? "Aceita" : "Aceitar")
-                                    .font(.system(size: 9, weight: .bold))
-                            }
-                            .foregroundColor(item.isAccepted ? .green : .secondary)
-                            .padding(.leading, 4)
-                        }
-                        .buttonStyle(.plain)
+                        Spacer()
+                        Text(viewModel.isPausedForBreak ? "LIGADO" : "OFF")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(viewModel.isPausedForBreak ? Color.yellow.opacity(0.25) : Color.black.opacity(0.3))
+                            .foregroundColor(viewModel.isPausedForBreak ? .yellow : .secondary)
+                            .cornerRadius(6)
                     }
-                    .padding(10)
-                    .background(Color(.systemBackground))
-                    .cornerRadius(10)
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
     }
     
-    // MARK: - Seção 3: Painel de Inteligência Artificial (Aprendizado Local) e Apple Maps
+    // MARK: - ABA 2: Termômetro da Meta 250+ & Histórico do Turno
     
-    private var learningAndMapsSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("INTELIGÊNCIA NATIVA (APPLE MAPS + MACHINE LEARNING)")
-                .font(.caption.bold())
-                .foregroundColor(.secondary)
-            
-            VStack(spacing: 10) {
-                Toggle("🗺️ Consultar Trânsito Real no Apple Maps (MapKit)", isOn: $viewModel.settings.usarVerificacaoAppleMaps)
-                    .font(.subheadline.bold())
-                
-                Text("Compara os minutos informados pela Uber com o trânsito real da rua no Apple Maps para descobrir se a Uber exagerou no tempo ou escondeu um engarrafamento.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                HStack {
-                    Text("Cidade Padrão:")
+    private var goalAndHistoryTabView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Card Principal da Meta 250+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label(
+                            viewModel.isMetaDiariaBatida
+                                ? "🔥 MODO 250+ ATIVO (META BATIDA!)"
+                                : "META DIÁRIA LÍQUIDA (R$ 250+)",
+                            systemImage: viewModel.isMetaDiariaBatida ? "trophy.fill" : "flame.fill"
+                        )
                         .font(.caption.bold())
-                    TextField("Ex: Maringá, PR", text: $viewModel.settings.cidadePadrao)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                }
-                
-                Divider()
-                
-                Toggle("🧠 Aprendizado Automático de Bairros e Trânsito", isOn: $viewModel.settings.usarAprendizadoDeMaquina)
-                    .font(.subheadline.bold())
-                
-                Text("Aprende sozinho quais regiões você evita mesmo pagando bem (Segurança), mede o tempo ocioso após cada desembarque (Volta Vazia) e liga o Modo Trânsito quando a velocidade média das chamadas cai.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(12)
-            .background(Color(.systemBackground))
-            .cornerRadius(10)
-            
-            HStack {
-                Text("MEMÓRIA DE BAIRROS APRENDIDA (\(viewModel.learnedProfiles.count))")
-                    .font(.caption.bold())
-                    .foregroundColor(.secondary)
-                Spacer()
-                if !viewModel.learnedProfiles.isEmpty {
-                    Button("Zerar Memória IA", role: .destructive) {
-                        viewModel.clearLearnedProfiles()
+                        .foregroundColor(viewModel.isMetaDiariaBatida ? .mint : .orange)
+                        
+                        Spacer()
+                        
+                        Text("\(viewModel.percentualRealMetaDiaria)%")
+                            .font(.headline.bold())
+                            .foregroundColor(.green)
                     }
-                    .font(.caption.bold())
+                    
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(formatCurrency(viewModel.totalLucroLiquidoAceito))
+                            .font(.system(size: 32, weight: .black, design: .rounded))
+                            .foregroundColor(.green)
+                        Text("líquidos hoje")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    
+                    ProgressView(value: viewModel.progressoMetaDiaria)
+                        .tint(viewModel.isMetaDiariaBatida ? .mint : .green)
+                        .scaleEffect(x: 1, y: 1.8, anchor: .center)
+                    
+                    HStack {
+                        if viewModel.isMetaDiariaBatida {
+                            Text("Bônus acima de R$ \(Int(viewModel.settings.metaDiariaLiquida)): +\(formatCurrency(viewModel.valorExcedenteMetaDiaria))")
+                                .font(.caption.bold())
+                                .foregroundColor(.mint)
+                        } else {
+                            Text("Faltam \(formatCurrency(viewModel.faltaParaMetaDiaria)) para bater R$ \(Int(viewModel.settings.metaDiariaLiquida)),00")
+                                .font(.caption.bold())
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Text("\(viewModel.acceptedRides.count) aceitas")
+                            .font(.caption.bold())
+                            .foregroundColor(.cyan)
+                    }
+                    
+                    Divider()
+                    
+                    HStack {
+                        summaryStat(title: "Bruto Aceito", value: formatCurrency(viewModel.totalBrutoAceito))
+                        Spacer()
+                        summaryStat(title: "Gasolina/KM", value: "- " + formatCurrency(viewModel.totalCustoCombustivelAceito))
+                        Spacer()
+                        summaryStat(title: "KM Rodados", value: String(format: "%.1f km", viewModel.totalKmAceito).replacingOccurrences(of: ".", with: ","))
+                    }
+                }
+                .padding(16)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(16)
+                
+                // Lista de Ofertas Recebidas
+                HStack {
+                    Text("HISTÓRICO DE CHAMADAS (\(viewModel.rideHistory.count))")
+                        .font(.caption.bold())
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    if !viewModel.rideHistory.isEmpty {
+                        Button("Zerar Turno", role: .destructive) {
+                            viewModel.clearHistory()
+                        }
+                        .font(.caption.bold())
+                    }
+                }
+                
+                if viewModel.rideHistory.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "car.2.fill")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("Nenhuma corrida registrada neste turno.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(14)
+                } else {
+                    ForEach(viewModel.rideHistory) { item in
+                        let lucroItem = item.data.lucroLiquido(custoPorKm: viewModel.settings.custoPorKm)
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(item.verdict.backgroundColor)
+                                .frame(width: 12, height: 12)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(item.verdict.message)
+                                        .font(.subheadline.bold())
+                                    Spacer()
+                                    if let badge = item.verdict.passengerBadge {
+                                        Text(badge)
+                                            .font(.caption2.bold())
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color(.tertiarySystemBackground))
+                                            .cornerRadius(4)
+                                    }
+                                }
+                                
+                                Text("Bruto: \(formatCurrency(item.data.valorTotal)) • Líquido: \(formatCurrency(lucroItem))")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.green)
+                                
+                                Text("Destino: \(item.data.enderecoDestino)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            
+                            Button {
+                                viewModel.toggleAccepted(for: item.id)
+                            } label: {
+                                VStack(spacing: 3) {
+                                    Image(systemName: item.isAccepted ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 22))
+                                    Text(item.isAccepted ? "Aceita" : "Somar")
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .foregroundColor(item.isAccepted ? .green : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(12)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+                    }
                 }
             }
-            
-            if viewModel.learnedProfiles.isEmpty {
-                Text("O motor de aprendizado ainda está coletando dados. Conforme você aceita ou ignora corridas no dia a dia, os perfis de cada bairro aparecem aqui.")
+            .padding(16)
+        }
+    }
+    
+    // MARK: - ABA 3: Simulador de Rotas Reais (Maringá • Sarandi • Marialva)
+    
+    private var simulatorTabView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                // Mini Visor no Topo do Simulador para ver o resultado na hora sem trocar de aba
+                PiPOverlayView(viewModel: viewModel)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 110)
+                    .cornerRadius(14)
+                    .shadow(radius: 6)
+                
+                Text("Toque em qualquer cenário abaixo para testar a matemática e o alerta de voz (não afeta o treino real da IA):")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .padding(.vertical, 6)
-            } else {
-                ForEach(viewModel.learnedProfiles) { profile in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(profile.displayName)
-                                .font(.subheadline.bold())
-                            Spacer()
-                            if profile.isLearnedDangerZone {
-                                Text("🚨 EVITADO / RISCO")
-                                    .font(.caption2.bold())
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.red.opacity(0.2))
-                                    .foregroundColor(.red)
-                                    .cornerRadius(4)
-                            } else if profile.isLearnedDeadheadZone {
-                                Text("🛣️ VOLTA VAZIA")
-                                    .font(.caption2.bold())
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.orange.opacity(0.2))
-                                    .foregroundColor(.orange)
-                                    .cornerRadius(4)
-                            } else {
-                                Text("✓ NORMAL")
-                                    .font(.caption2.bold())
-                                    .foregroundColor(.green)
+                
+                simulatorCardButton(
+                    title: "Maringá → Maringá (Tiro Curto Top)",
+                    subtitle: "R$ 12,91 • 3,7 km (11 min) • Zona 7 → Centro",
+                    badgeText: "APROVA",
+                    badgeColor: .green
+                ) {
+                    viewModel.handleNewOCRText("""
+                    R$ 12,91
+                    Est. de R$3,49/km
+                    4,97 (254) Verificado
+                    2 min (0.4 km) Av. Maringá, Zona 7
+                    9 minutos (3.3 km) Av. Brasil, Centro
+                    """, isSimulated: true)
+                }
+                
+                simulatorCardButton(
+                    title: "Maringá → Sarandi (Corrida Boa)",
+                    subtitle: "R$ 20,35 • 11 km (18 min) • Sem penalidade de volta vazia!",
+                    badgeText: "APROVA",
+                    badgeColor: .green
+                ) {
+                    viewModel.handleNewOCRText("""
+                    R$ 20,35
+                    4,94 (190) Verificado
+                    2 min (0.8 km) Av. Colombo, Zona 7
+                    16 minutos (10.2 km) Av. Londrina, Sarandi
+                    """, isSimulated: true)
+                }
+                
+                simulatorCardButton(
+                    title: "Sarandi → Maringá (Retorno p/ Base)",
+                    subtitle: "R$ 16,50 • 11 km (18 min) • Passageiro pagando sua volta!",
+                    badgeText: "VOLTA P/ MGA",
+                    badgeColor: .blue
+                ) {
+                    viewModel.handleNewOCRText("""
+                    R$ 16,50
+                    4,92 (140) Verificado
+                    2 min (0.7 km) Av. Maringá, Sarandi
+                    16 minutos (10.3 km) Av. Brasil, Zona 1, Maringá
+                    """, isSimulated: true)
+                }
+                
+                simulatorCardButton(
+                    title: "Maringá → Marialva (Comum Fraca)",
+                    subtitle: "R$ 26,00 • 18 km (24 min) • Desconta a volta vazia (Sobra R$ 7,67)",
+                    badgeText: "CILADA",
+                    badgeColor: .red
+                ) {
+                    viewModel.handleNewOCRText("""
+                    R$ 26,00
+                    4,95 (310) Verificado
+                    3 min (1.0 km) Av. Brasil, Centro
+                    21 minutos (17.0 km) Centro, Marialva
+                    """, isSimulated: true)
+                }
+                
+                simulatorCardButton(
+                    title: "Maringá → Marialva (Valor Bom de Fato!)",
+                    subtitle: "R$ 42,00 • 18 km (24 min) • Compensa ida + volta (Líq R$ 23,67)",
+                    badgeText: "MARIALVA TOP",
+                    badgeColor: .mint
+                ) {
+                    viewModel.handleNewOCRText("""
+                    R$ 42,00
+                    4,98 (420) Verificado
+                    3 min (1.0 km) Av. Brasil, Centro
+                    21 minutos (17.0 km) Centro, Marialva
+                    """, isSimulated: true)
+                }
+                
+                simulatorCardButton(
+                    title: "Embarque em Supermercado / Atacadão",
+                    subtitle: "R$ 10,50 • 4,4 km • Alerta de carrinho cheio e perda de tempo",
+                    badgeText: "MERCADO",
+                    badgeColor: .orange
+                ) {
+                    viewModel.handleNewOCRText("""
+                    R$ 10,50
+                    4,91 (110) Verificado
+                    2 min (0.6 km) Atacadão, Av. Colombo
+                    9 minutos (3.8 km) Jardim Alvorada
+                    """, isSimulated: true)
+                }
+                
+                simulatorCardButton(
+                    title: "Passageiro Conta Nova (Só 4 viagens)",
+                    subtitle: "R$ 12,00 • Nota 5,00 (4) • Alerta de segurança para conta recém-criada",
+                    badgeText: "CONTA NOVA",
+                    badgeColor: .orange
+                ) {
+                    viewModel.handleNewOCRText("""
+                    R$ 12,00
+                    5,00 (4)
+                    2 min (0.5 km) Zona 5
+                    9 minutos (4.0 km) Jardim América
+                    """, isSimulated: true)
+                }
+                
+                simulatorCardButton(
+                    title: "Apple Maps: Uber exagerou os minutos",
+                    subtitle: "R$ 10,00 • 20m na Uber mas apenas 6m livres no Apple Maps!",
+                    badgeText: "MAPS TOP",
+                    badgeColor: .cyan
+                ) {
+                    let overOCR = """
+                    R$ 10,00
+                    4,96 (210) Verificado
+                    2 min (1.0 km) Av. Brasil, Centro
+                    18 minutos (1.0 km) Av. São Paulo, Zona 1
+                    """
+                    let mapOverride = MapTrafficVerification(
+                        appleMapsTotalMinutes: 6.0,
+                        appleMapsTotalKm: 2.0,
+                        minutesDifferenceFromUber: -14.0
+                    )
+                    viewModel.handleNewOCRText(overOCR, simulatedMapOverride: mapOverride, isSimulated: true)
+                }
+            }
+            .padding(16)
+        }
+    }
+    
+    // MARK: - ABA 4: Ajustes, Custos, Apple Maps e IA Local
+    
+    private var settingsAndAITabView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                // Bloco 1: Custo do Carro e Meta 250+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("💰 SEU CARRO & META DIÁRIA (250+)")
+                        .font(.caption.bold())
+                        .foregroundColor(.cyan)
+                    
+                    Stepper(value: $viewModel.settings.metaDiariaLiquida, in: 100.0...1000.0, step: 25.0) {
+                        metricRow(title: "Meta Diária Base (250+)", value: formatCurrency(viewModel.settings.metaDiariaLiquida))
+                    }
+                    
+                    Stepper(value: $viewModel.settings.custoPorKm, in: 0.20...2.00, step: 0.05) {
+                        metricRow(title: "Custo de Combustível/KM", value: formatCurrency(viewModel.settings.custoPorKm) + "/km")
+                    }
+                    
+                    Stepper(value: $viewModel.settings.minutosEsperaPortao, in: 0.0...5.0, step: 0.5) {
+                        metricRow(title: "Taxa de Espera no Portão", value: String(format: "%.1f min", viewModel.settings.minutosEsperaPortao).replacingOccurrences(of: ".", with: ","))
+                    }
+                }
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(14)
+                
+                // Bloco 2: Critérios de Aprovação (Maringá / Sarandi / Marialva)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("🎯 METAS DE APROVAÇÃO DA CORRIDA")
+                        .font(.caption.bold())
+                        .foregroundColor(.cyan)
+                    
+                    Stepper(value: $viewModel.settings.minValorCorrida, in: 5.0...20.0, step: 0.50) {
+                        metricRow(title: "Valor Mínimo da Chamada", value: formatCurrency(viewModel.settings.minValorCorrida))
+                    }
+                    
+                    Stepper(value: $viewModel.settings.minGanhoKmNormal, in: 1.0...4.0, step: 0.05) {
+                        metricRow(title: "Mínimo R$/km (Maringá/Sarandi)", value: formatCurrency(viewModel.settings.minGanhoKmNormal) + "/km")
+                    }
+                    
+                    Stepper(value: $viewModel.settings.minGanhoKmListaNegra, in: 1.50...4.50, step: 0.10) {
+                        metricRow(title: "Mínimo R$/km (Marialva/Volta Vazia)", value: formatCurrency(viewModel.settings.minGanhoKmListaNegra) + "/km")
+                    }
+                    
+                    Stepper(value: $viewModel.settings.minGanhoHoraTransito, in: 20.0...100.0, step: 2.5) {
+                        metricRow(title: "Mínimo R$/h no Trânsito", value: formatCurrency(viewModel.settings.minGanhoHoraTransito) + "/h")
+                    }
+                    
+                    Stepper(value: $viewModel.settings.maxKmBusca, in: 0.5...8.0, step: 0.2) {
+                        metricRow(title: "Distância Máxima de Busca", value: String(format: "%.1f km", viewModel.settings.maxKmBusca).replacingOccurrences(of: ".", with: ","))
+                    }
+                    
+                    Stepper(value: $viewModel.settings.minNotaPassageiro, in: 4.40...4.95, step: 0.05) {
+                        metricRow(title: "Nota Mínima do Passageiro", value: String(format: "★ %.2f", viewModel.settings.minNotaPassageiro).replacingOccurrences(of: ".", with: ","))
+                    }
+                    
+                    Stepper(value: $viewModel.settings.minViagensPassageiro, in: 5...50, step: 5) {
+                        metricRow(title: "Alerta Conta Nova (Mín. Viagens)", value: "\(viewModel.settings.minViagensPassageiro) viagens")
+                    }
+                }
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(14)
+                
+                // Bloco 3: Inteligência Artificial & Apple Maps
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("🧠 APPLE MAPS & APRENDIZADO IA")
+                            .font(.caption.bold())
+                            .foregroundColor(.cyan)
+                        Spacer()
+                        if !viewModel.learnedProfiles.isEmpty {
+                            Button("Limpar Memória IA", role: .destructive) {
+                                viewModel.clearLearnedProfiles()
                             }
-                        }
-                        
-                        Text("Ofertas: \(profile.totalOffersCount) • Aceitas: \(profile.acceptedCount) • Recusadas pagando bem: \(profile.rejectedWhenGoodCount)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        
-                        if !profile.deadheadWaitMinutesSamples.isEmpty {
-                            Text(String(format: "Média de espera após desembarque: %.0f min sem corrida", profile.averageDeadheadMinutes))
-                                .font(.caption2.bold())
-                                .foregroundColor(.orange)
+                            .font(.caption2.bold())
                         }
                     }
-                    .padding(10)
-                    .background(Color(.systemBackground))
-                    .cornerRadius(10)
+                    
+                    Toggle("🗺️ Consultar Trânsito Real no Apple Maps", isOn: $viewModel.settings.usarVerificacaoAppleMaps)
+                        .font(.subheadline.bold())
+                    
+                    Toggle("🧠 Aprender Bairros Evitados e Volta Vazia", isOn: $viewModel.settings.usarAprendizadoDeMaquina)
+                        .font(.subheadline.bold())
+                    
+                    HStack {
+                        Text("Cidade Base:")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                        TextField("Ex: Maringá, PR", text: $viewModel.settings.cidadePadrao)
+                            .textFieldStyle(.roundedBorder)
+                    }
                 }
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(14)
+                
+                // Bloco 4: Listas de Cidades e Bairros
+                VStack(alignment: .leading, spacing: 16) {
+                    keywordListEditor(
+                        title: "⚠️ DESTINOS DE VOLTA VAZIA (SOMA IDA + VOLTA)",
+                        placeholder: "Ex: Marialva, Iguatemi, Floriano...",
+                        textBinding: $newBlacklistKeyword,
+                        items: viewModel.settings.blacklistedKeywords,
+                        icon: "arrow.uturn.backward.circle.fill",
+                        iconColor: .orange,
+                        onAdd: {
+                            viewModel.addBlacklistedKeyword(newBlacklistKeyword)
+                            newBlacklistKeyword = ""
+                        },
+                        onDelete: { index in
+                            viewModel.removeBlacklistedKeyword(at: IndexSet(integer: index))
+                        }
+                    )
+                    
+                    keywordListEditor(
+                        title: "🛒 MERCADOS / ATACADÕES (AVISO DE COMPRAS)",
+                        placeholder: "Ex: Atacadão, Assaí, Muffato...",
+                        textBinding: $newMarketKeyword,
+                        items: viewModel.settings.marketPickupKeywords,
+                        icon: "cart.fill",
+                        iconColor: .yellow,
+                        onAdd: {
+                            viewModel.addMarketKeyword(newMarketKeyword)
+                            newMarketKeyword = ""
+                        },
+                        onDelete: { index in
+                            viewModel.removeMarketKeyword(at: IndexSet(integer: index))
+                        }
+                    )
+                    
+                    keywordListEditor(
+                        title: "🏠 SUA BASE PRINCIPAL / RUMO A CASA",
+                        placeholder: "Ex: Maringá, Centro, Zona 7...",
+                        textBinding: $newHomeKeyword,
+                        items: viewModel.settings.favoriteHomeKeywords,
+                        icon: "house.circle.fill",
+                        iconColor: .blue,
+                        onAdd: {
+                            viewModel.addFavoriteHomeKeyword(newHomeKeyword)
+                            newHomeKeyword = ""
+                        },
+                        onDelete: { index in
+                            viewModel.removeFavoriteHomeKeyword(at: IndexSet(integer: index))
+                        }
+                    )
+                    
+                    keywordListEditor(
+                        title: "🛑 ZONAS PROIBIDAS (REPROVA SEMPRE)",
+                        placeholder: "Adicionar bairro proibido...",
+                        textBinding: $newDangerKeyword,
+                        items: viewModel.settings.dangerZoneKeywords,
+                        icon: "exclamationmark.octagon.fill",
+                        iconColor: .red,
+                        onAdd: {
+                            viewModel.addDangerZoneKeyword(newDangerKeyword)
+                            newDangerKeyword = ""
+                        },
+                        onDelete: { index in
+                            viewModel.removeDangerZoneKeyword(at: IndexSet(integer: index))
+                        }
+                    )
+                    
+                    Button(role: .destructive) {
+                        viewModel.resetSettingsToDefault()
+                    } label: {
+                        Label("Restaurar Padrões de Fábrica", systemImage: "arrow.counterclockwise")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(14)
             }
+            .padding(16)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
     }
     
-    // MARK: - Seção 4: Custos, Metas e Mapas Geográficos Manuais
+    // MARK: - Componentes Visuais Automotivos
     
-    private var settingsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("CUSTO DO CARRO E METAS")
-                    .font(.caption.bold())
+    private func cockpitModeButton(
+        title: String,
+        subtitle: String,
+        icon: String,
+        activeColor: Color,
+        isOn: Binding<Bool>
+    ) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(isOn.wrappedValue ? activeColor : .secondary)
+                    Spacer()
+                    Text(isOn.wrappedValue ? "ATIVO" : "OFF")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(isOn.wrappedValue ? activeColor.opacity(0.25) : Color.black.opacity(0.25))
+                        .foregroundColor(isOn.wrappedValue ? activeColor : .secondary)
+                        .cornerRadius(6)
+                }
+                
+                Text(title)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary)
-                Spacer()
-                Button("Restaurar Padrão") {
-                    viewModel.resetSettingsToDefault()
-                }
-                .font(.caption)
-            }
-            
-            VStack(spacing: 10) {
-                Stepper(
-                    value: $viewModel.settings.custoPorKm,
-                    in: 0.20...2.50,
-                    step: 0.05
-                ) {
-                    metricRow(title: "Custo do Carro (Combustível/KM)", value: formatCurrency(viewModel.settings.custoPorKm) + "/km")
-                }
-                
-                Stepper(
-                    value: $viewModel.settings.minValorCorrida,
-                    in: 5.0...15.0,
-                    step: 0.50
-                ) {
-                    metricRow(title: "Valor Mínimo da Chamada", value: formatCurrency(viewModel.settings.minValorCorrida))
-                }
-                
-                Stepper(
-                    value: $viewModel.settings.metaDiariaLiquida,
-                    in: 50.0...1000.0,
-                    step: 25.0
-                ) {
-                    metricRow(title: "Meta Diária Líquida", value: formatCurrency(viewModel.settings.metaDiariaLiquida))
-                }
-                
-                Divider()
-                
-                Stepper(
-                    value: $viewModel.settings.minGanhoKmNormal,
-                    in: 1.0...4.0,
-                    step: 0.05
-                ) {
-                    metricRow(title: "Meta Maringá/Sarandi (R$/km)", value: formatCurrency(viewModel.settings.minGanhoKmNormal) + "/km")
-                }
-                
-                Stepper(
-                    value: $viewModel.settings.minGanhoKmListaNegra,
-                    in: 1.50...4.0,
-                    step: 0.10
-                ) {
-                    metricRow(title: "Mínimo Marialva/Floriano (R$/km)", value: formatCurrency(viewModel.settings.minGanhoKmListaNegra) + "/km")
-                }
-                
-                Stepper(
-                    value: $viewModel.settings.minGanhoHoraTransito,
-                    in: 25.0...90.0,
-                    step: 2.50
-                ) {
-                    metricRow(title: "Mínimo no Trânsito/Chuva", value: formatCurrency(viewModel.settings.minGanhoHoraTransito) + "/h")
-                }
-                
-                Stepper(
-                    value: $viewModel.settings.maxTempoBuscaMin,
-                    in: 2.0...15.0,
-                    step: 1.0
-                ) {
-                    metricRow(title: "Busca Máxima (Minutos)", value: "\(Int(viewModel.settings.maxTempoBuscaMin)) min")
-                }
-                
-                Stepper(
-                    value: $viewModel.settings.maxKmBusca,
-                    in: 0.5...5.0,
-                    step: 0.2
-                ) {
-                    metricRow(title: "Busca Máxima (Distância KM)", value: String(format: "%.1f km", viewModel.settings.maxKmBusca).replacingOccurrences(of: ".", with: ","))
-                }
-                
-                Divider()
-                
-                Stepper(
-                    value: $viewModel.settings.minNotaPassageiro,
-                    in: 4.00...4.95,
-                    step: 0.05
-                ) {
-                    metricRow(title: "Nota Mínima Passageiro", value: String(format: "★ %.2f", viewModel.settings.minNotaPassageiro))
-                }
-                
-                Stepper(
-                    value: $viewModel.settings.minViagensPassageiro,
-                    in: 5...50,
-                    step: 5
-                ) {
-                    metricRow(title: "Mínimo Viagens (Conta Nova)", value: "\(viewModel.settings.minViagensPassageiro) viagens")
-                }
+                    .lineLimit(1)
             }
             .padding(12)
-            .background(Color(.systemBackground))
-            .cornerRadius(10)
-            
-            keywordListEditor(
-                title: "🚨 ZONAS DE RISCO / PROIBIDAS (REPROVA SEMPRE)",
-                placeholder: "Adicionar local perigoso...",
-                textBinding: $newDangerKeyword,
-                items: viewModel.settings.dangerZoneKeywords,
-                icon: "exclamationmark.triangle.fill",
-                iconColor: .red,
-                onAdd: {
-                    viewModel.addDangerZoneKeyword(newDangerKeyword)
-                    newDangerKeyword = ""
-                },
-                onDelete: { index in
-                    viewModel.removeDangerZoneKeyword(at: IndexSet(integer: index))
-                }
-            )
-            
-            keywordListEditor(
-                title: "🛣️ VOLTA VAZIA: MARIALVA / IGUATEMI / FLORIANO (EXIGE >= \(formatCurrency(viewModel.settings.minGanhoKmListaNegra))/KM)",
-                placeholder: "Adicionar cidade/distrito sem volta...",
-                textBinding: $newBlacklistKeyword,
-                items: viewModel.settings.blacklistedKeywords,
-                icon: "mappin.slash.circle.fill",
-                iconColor: .orange,
-                onAdd: {
-                    viewModel.addBlacklistedKeyword(newBlacklistKeyword)
-                    newBlacklistKeyword = ""
-                },
-                onDelete: { index in
-                    viewModel.removeBlacklistedKeyword(at: IndexSet(integer: index))
-                }
-            )
-            
-            keywordListEditor(
-                title: "🛒 MERCADOS / ATACADÕES (ALERTA DE COMPRAS NO EMBARQUE)",
-                placeholder: "Adicionar supermercado/atacadão...",
-                textBinding: $newMarketKeyword,
-                items: viewModel.settings.marketPickupKeywords,
-                icon: "cart.fill",
-                iconColor: .yellow,
-                onAdd: {
-                    viewModel.addMarketKeyword(newMarketKeyword)
-                    newMarketKeyword = ""
-                },
-                onDelete: { index in
-                    viewModel.removeMarketKeyword(at: IndexSet(integer: index))
-                }
-            )
-            
-            keywordListEditor(
-                title: "🏠 SUA BASE PRINCIPAL / RUMO A CASA (MARINGÁ)",
-                placeholder: "Adicionar bairro de Maringá...",
-                textBinding: $newHomeKeyword,
-                items: viewModel.settings.favoriteHomeKeywords,
-                icon: "house.circle.fill",
-                iconColor: .blue,
-                onAdd: {
-                    viewModel.addFavoriteHomeKeyword(newHomeKeyword)
-                    newHomeKeyword = ""
-                },
-                onDelete: { index in
-                    viewModel.removeFavoriteHomeKeyword(at: IndexSet(integer: index))
-                }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isOn.wrappedValue ? activeColor.opacity(0.14) : Color(.secondarySystemBackground))
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(isOn.wrappedValue ? activeColor.opacity(0.8) : Color.white.opacity(0.06), lineWidth: 1.5)
             )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .buttonStyle(.plain)
     }
     
-    // MARK: - Componentes Visuais Auxiliares
+    private func simulatorCardButton(
+        title: String,
+        subtitle: String,
+        badgeText: String,
+        badgeColor: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(badgeColor)
+                    .frame(width: 5, height: 42)
+                
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+                
+                Text(badgeText)
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(badgeColor.opacity(0.20))
+                    .foregroundColor(badgeColor)
+                    .cornerRadius(8)
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+    }
     
     private func keywordListEditor(
         title: String,
@@ -798,7 +989,7 @@ struct ContentView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.caption.bold())
+                .font(.caption2.bold())
                 .foregroundColor(.secondary)
             
             HStack {
@@ -824,8 +1015,8 @@ struct ContentView: View {
                             .font(.caption)
                     }
                 }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .padding(.horizontal, 10)
                 .background(Color(.systemBackground))
                 .cornerRadius(8)
             }
@@ -849,7 +1040,7 @@ struct ContentView: View {
             Spacer()
             Text(value)
                 .font(.subheadline.bold())
-                .foregroundColor(.blue)
+                .foregroundColor(.cyan)
         }
     }
     

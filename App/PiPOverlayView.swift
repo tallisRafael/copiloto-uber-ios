@@ -1,109 +1,165 @@
 import SwiftUI
 import ReplayKit
+import UIKit
 
 /// View injetada dentro da janela flutuante do Picture-in-Picture (PiP).
-/// Desenhada com alto contraste (Semáforo Verde / Azul Rumo a Casa / Amarelo / Vermelho / Neutro) e fontes grandes.
+/// Desenhada com estética Automotiva Premium (alto contraste, leitura em 0.3s e sem poluição visual).
 struct PiPOverlayView: View {
     @ObservedObject var viewModel: RideAssistantViewModel
     
     var body: some View {
         ZStack {
-            // Cor de fundo dinâmica
+            // Cor de fundo dinâmica do Semáforo
             viewModel.currentVerdict.backgroundColor
                 .ignoresSafeArea()
             
-            VStack(spacing: 5) {
-                // Linha superior: Badges de Modo Trânsito, Rumo a Casa, Dinheiro, Nota do Passageiro e Toggle
-                HStack(spacing: 5) {
-                    Label(
-                        viewModel.isTrafficModeEnabled ? "TRÂNSITO" : "NORMAL",
-                        systemImage: viewModel.isTrafficModeEnabled ? "cloud.heavyrain.fill" : "car.fill"
-                    )
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 6)
+            VStack(spacing: 6) {
+                // Linha superior: Modo ativo, Nota/Viagens do Passageiro, Alerta de Dinheiro e Ícone de Som
+                HStack(spacing: 6) {
+                    HStack(spacing: 4) {
+                        Image(systemName: viewModel.isTrafficModeEnabled ? "cloud.heavyrain.fill" : "bolt.car.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(viewModel.isTrafficModeEnabled ? "TRÂNSITO" : "ATIVO")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    }
+                    .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.28))
+                    .background(Color.black.opacity(0.30))
                     .cornerRadius(6)
                     
                     if viewModel.isGoingHomeModeEnabled {
-                        Label("CASA", systemImage: "house.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.32))
-                            .cornerRadius(6)
+                        HStack(spacing: 3) {
+                            Image(systemName: "house.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("CASA")
+                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(0.32))
+                        .cornerRadius(6)
                     }
                     
                     if let passengerBadge = viewModel.currentVerdict.passengerBadge {
                         Text(passengerBadge)
                             .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            .padding(.horizontal, 6)
+                            .padding(.horizontal, 7)
                             .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.35))
+                            .background(Color.black.opacity(0.36))
                             .cornerRadius(6)
                     }
                     
                     if viewModel.currentVerdict.isCashPayment {
                         Text("💵 DINHEIRO")
-                            .font(.system(size: 10, weight: .black))
+                            .font(.system(size: 10, weight: .black, design: .rounded))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.40))
+                            .background(Color.black.opacity(0.42))
                             .cornerRadius(6)
                     }
                     
                     Spacer()
                     
-                    Image(systemName: viewModel.audioAlertMode.iconName)
-                        .font(.system(size: 10, weight: .bold))
-                        .padding(4)
-                        .background(Color.black.opacity(0.25))
-                        .clipShape(Circle())
-                    
-                    // Toggle interativo (funciona no app e caso a janela receba toque)
-                    Toggle("Trânsito", isOn: $viewModel.isTrafficModeEnabled)
-                        .labelsHidden()
-                        .toggleStyle(SwitchToggleStyle(tint: .yellow))
-                        .scaleEffect(0.70)
+                    HStack(spacing: 4) {
+                        Image(systemName: viewModel.audioAlertMode.iconName)
+                            .font(.system(size: 10, weight: .bold))
+                        Text("R$ \(Int(viewModel.totalLucroLiquidoAceito))/\(Int(viewModel.settings.metaDiariaLiquida))")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.28))
+                    .cornerRadius(6)
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 12)
                 
                 // Mensagem Principal do Veredito
                 Text(viewModel.currentVerdict.message)
-                    .font(.system(size: 20, weight: .black, design: .rounded))
+                    .font(.system(size: 21, weight: .black, design: .rounded))
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.6)
-                    .lineLimit(2)
-                    .padding(.horizontal, 8)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
                 
                 // Linha de métricas complementares (inclui Lucro Líquido Real)
                 Text(viewModel.currentVerdict.detailMetrics)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.94))
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.95))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 10)
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
         }
-        // Proporção panorâmica compacta ideal para janela flutuante no topo da tela
         .frame(width: 380, height: 110)
     }
 }
 
-/// Botão nativo do ReplayKit (RPSystemBroadcastPickerView) encapsulado para SwiftUI
-struct BroadcastPickerRepresentable: UIViewRepresentable {
-    /// Bundle Identifier do target da sua Broadcast Upload Extension
-    let extensionBundleIdentifier: String
+/// Container UIKit que dispara o `RPSystemBroadcastPickerView` ao tocar em qualquer parte do botão
+/// sem vazar área de toque para outros elementos da tela e usando o Bundle ID dinâmico do Sideloadly.
+final class BroadcastButtonContainerView: UIView {
+    private let picker = RPSystemBroadcastPickerView(frame: .zero)
     
-    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
-        picker.preferredExtension = extensionBundleIdentifier
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        backgroundColor = .clear
+        
+        picker.preferredExtension = SharedConstants.broadcastExtensionBundleIdentifier
         picker.showsMicrophoneButton = false
-        return picker
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(picker)
+        
+        NSLayoutConstraint.activate([
+            picker.centerXAnchor.constraint(equalTo: centerXAnchor),
+            picker.centerYAnchor.constraint(equalTo: centerYAnchor),
+            picker.widthAnchor.constraint(equalToConstant: 44),
+            picker.heightAnchor.constraint(equalToConstant: 44)
+        ])
     }
     
-    func updateUIView(_ uiView: RPSystemBroadcastPickerView, context: Context) {}
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    /// Aciona programaticamente o seletor nativo de gravação de tela do iOS
+    func triggerPicker() {
+        picker.preferredExtension = SharedConstants.broadcastExtensionBundleIdentifier
+        for subview in picker.subviews {
+            if let button = subview as? UIButton {
+                button.sendActions(for: .touchUpInside)
+                button.sendActions(for: .allTouchEvents)
+                break
+            }
+        }
+    }
+}
+
+/// Representable invisível/compacto que permite acionar o ReplayKit por um botão SwiftUI moderno
+struct BroadcastPickerRepresentable: UIViewRepresentable {
+    let triggerId: Int
+    
+    func makeUIView(context: Context) -> BroadcastButtonContainerView {
+        BroadcastButtonContainerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+    }
+    
+    func updateUIView(_ uiView: BroadcastButtonContainerView, context: Context) {
+        if context.coordinator.lastTriggerId != triggerId {
+            context.coordinator.lastTriggerId = triggerId
+            uiView.triggerPicker()
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(lastTriggerId: triggerId)
+    }
+    
+    final class Coordinator {
+        var lastTriggerId: Int
+        init(lastTriggerId: Int) {
+            self.lastTriggerId = lastTriggerId
+        }
+    }
 }
