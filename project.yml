@@ -21,13 +21,26 @@ targets:
       - path: Shared
     info:
       path: Config/App-Info.plist
+      properties:
+        CFBundleDisplayName: Copiloto Uber
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIBackgroundModes:
+          - audio
+          - processing
+        NSLocationWhenInUseUsageDescription: "Usado para consultar o trânsito real das corridas exatamente na sua cidade atual pelo Apple Maps."
     entitlements:
       path: Config/App.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.seuapp.uberhelper
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.seuapp.uberhelper
         PRODUCT_NAME: UberDriverHelper
         GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Config/App-Info.plist
         CODE_SIGN_ENTITLEMENTS: Config/App.entitlements
     dependencies:
       - target: BroadcastExtension
@@ -42,13 +55,22 @@ targets:
       - path: Shared
     info:
       path: Config/BroadcastExtension-Info.plist
+      properties:
+        CFBundleDisplayName: Leitor Copiloto Uber
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).SampleHandler"
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
     entitlements:
       path: Config/BroadcastExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.seuapp.uberhelper
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.seuapp.uberhelper.BroadcastExtension
         PRODUCT_NAME: BroadcastExtension
         GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Config/BroadcastExtension-Info.plist
         CODE_SIGN_ENTITLEMENTS: Config/BroadcastExtension.entitlements
         SKIP_INSTALL: YES
-
