@@ -632,7 +632,7 @@ final class RideRuleEngine {
             )
         }
         
-        // PRIORIDADE 7: Exceção de Ouro (Avaliada com o ganho/hora real corrigido pelo Apple Maps se disponível)
+        // PRIORIDADE 7: Exceção de Ouro (Aprovada se for lucrativa MESMO com trânsito real do Maps)
         let isNewAccount = (ride.numeroViagensPassageiro != nil) && (ride.numeroViagensPassageiro! < settings.minViagensPassageiro)
         let matchedMarket = findMatchingKeyword(in: ride.enderecoBusca, keywords: settings.marketPickupKeywords)
         let willHitDailyGoal = (currentDailyNetProfit > 0.0) &&
@@ -640,7 +640,7 @@ final class RideRuleEngine {
             ((currentDailyNetProfit + lucroLiq) >= settings.metaDiariaLiquida)
         let metaIntStr = String(format: "%.0f", settings.metaDiariaLiquida)
         
-        if matchedMarket == nil && !isNewAccount && !isMapsTrafficTrap &&
+        if matchedMarket == nil && !isNewAccount &&
            effectiveGanhoHora >= settings.goldGanhoHora && ride.ganhoKm >= settings.goldGanhoKm && ride.valorTotal >= settings.minValorCorrida {
             let prefix: String = {
                 if willHitDailyGoal {
@@ -668,8 +668,14 @@ final class RideRuleEngine {
             )
         }
         
-        // PRIORIDADE 8: Busca Longa (Por Tempo > 5 min OU por Distância > maxKmBusca)
-        if ride.tempoBuscaMin > settings.maxTempoBuscaMin || ride.kmBusca > settings.maxKmBusca {
+        // PRIORIDADE 8: Busca Longa (Com tolerância proporcional para Corridas de Alto Valor)
+        // Se a corrida for de alto valor (>= R$ 35, lucro líq. >= R$ 25, >= R$ 2,00/km e >= R$ 50/h),
+        // o valor cobre o deslocamento com sobra e tolera até 4.5 km / 12 min de busca!
+        let isSuperCompensada = (ride.valorTotal >= 35.0) && (lucroLiq >= 25.0) && (effectiveGanhoHora >= settings.goldGanhoHora) && (ride.ganhoKm >= settings.goldGanhoKm)
+        let effectiveMaxKmBusca = isSuperCompensada ? max(settings.maxKmBusca, 4.5) : settings.maxKmBusca
+        let effectiveMaxTempoBusca = isSuperCompensada ? max(settings.maxTempoBuscaMin, 12.0) : settings.maxTempoBuscaMin
+        
+        if ride.tempoBuscaMin > effectiveMaxTempoBusca || ride.kmBusca > effectiveMaxKmBusca {
             let kmBuscaStr = String(format: "%.1f", ride.kmBusca).replacingOccurrences(of: ".", with: ",")
             return buildGiguVerdict(
                 status: .rejected,

@@ -1,4 +1,4 @@
-# Suíte Completa de Testes + Simulação de Probabilidade (Maringá • Sarandi • Marialva + Meta 250+)
+﻿# Suíte Completa de Testes + Simulação de Probabilidade (Maringá • Sarandi • Marialva + Meta 250+)
 $ErrorActionPreference = "Stop"
 
 function Parse-RideOCR([string]$rawText) {
@@ -135,8 +135,12 @@ function Evaluate-Ride(
         $prefix = if ($willHit250) { "BATE OS 250" } elseif ($null -ne $destDeadhead) { "$($destDeadhead.ToUpper()) TOP" } elseif ($diffMaps -le -4.0) { "MAPS TOP" } else { "CORRIDA TOP" }
         return [PSCustomObject]@{ Status = "APPROVED"; Message = ('{0}: R${1:N2}/km' -f $prefix, $ride.GanhoKm); LucroLiq = $lucroLiq }
     }
-    # Busca Longa (Minutos > 5 ou KM > 2.2)
-    if ($ride.TempoBusca -gt 5.0 -or $ride.KmBusca -gt 2.2) {
+    # Busca Longa (Com tolerancia inteligente para corridas de alto valor)
+    $isSuperCompensada = ($ride.ValorTotal -ge 35.0) -and ($lucroLiq -ge 25.0) -and ($effectiveGanhoHora -ge 50.0) -and ($ride.GanhoKm -ge 2.00)
+    $effectiveMaxKm = if ($isSuperCompensada) { [math]::Max(2.2, 4.5) } else { 2.2 }
+    $effectiveMaxTempo = if ($isSuperCompensada) { [math]::Max(5.0, 12.0) } else { 5.0 }
+
+    if ($ride.TempoBusca -gt $effectiveMaxTempo -or $ride.KmBusca -gt $effectiveMaxKm) {
         return [PSCustomObject]@{ Status = "REJECTED"; Message = "CILADA: BUSCA LONGA"; LucroLiq = $lucroLiq }
     }
     # Corrida Mixuruca (< R$ 7,50)
