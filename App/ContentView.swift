@@ -904,7 +904,7 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - ABA 3: Simulador de Rotas Reais (Maringá • Sarandi • Marialva)
+    // MARK: - ABA 4: Simulador de Rotas Reais (Maringá • Sarandi • Marialva)
     
     private var simulatorTabView: some View {
         ScrollView {
@@ -1020,6 +1020,32 @@ struct ContentView: View {
                 }
                 
                 simulatorCardButton(
+                    title: "Apple Maps: Teste Dinâmico (Verde → Vira Vermelha)",
+                    subtitle: "Uber promete 11m (Verde) • 0,8s depois o Maps detecta trânsito e vira Vermelha!",
+                    badgeText: "2 ESTÁGIOS",
+                    badgeColor: .red
+                ) {
+                    let rideText = """
+                    R$ 13,50
+                    4,97 (320) Verificado
+                    2 min (0.6 km) Av. Colombo, Zona 7
+                    9 minutos (4.2 km) Av. Mandacaru, Maringá
+                    """
+                    // 1º Estágio instantâneo: Uber promete 11 min (Verde)
+                    viewModel.handleNewOCRText(rideText, simulatedMapOverride: nil, isSimulated: true)
+                    
+                    // 2º Estágio (0,8s depois): Apple Maps descobre trânsito pesado de 26 min (+15m)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        let trafficMap = MapTrafficVerification(
+                            appleMapsTotalMinutes: 26.0,
+                            appleMapsTotalKm: 4.8,
+                            minutesDifferenceFromUber: 15.0
+                        )
+                        viewModel.handleNewOCRText(rideText, simulatedMapOverride: trafficMap, isSimulated: true)
+                    }
+                }
+                
+                simulatorCardButton(
                     title: "Apple Maps: Uber exagerou os minutos",
                     subtitle: "R$ 10,00 • 20m na Uber mas apenas 6m livres no Apple Maps!",
                     badgeText: "MAPS TOP",
@@ -1044,6 +1070,8 @@ struct ContentView: View {
     }
     
     // MARK: - ABA 4: Ajustes, Custos, Apple Maps e IA Local
+    
+    // MARK: - ABA 5: Ajustes, Listas e IA Local
     
     private var settingsAndAITabView: some View {
         ScrollView {

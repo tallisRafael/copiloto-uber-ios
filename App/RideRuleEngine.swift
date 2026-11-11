@@ -621,6 +621,17 @@ final class RideRuleEngine {
             )
         }
         
+        // PRIORIDADE 6.8: Trânsito Pesado Detectado pelo Apple Maps (Avaliado antes de qualquer aprovação!)
+        let isMapsTrafficTrap = (mapVerification?.hasHiddenTrafficTrap == true)
+        if isMapsTrafficTrap && effectiveGanhoHora < settings.minGanhoHoraTransito {
+            return buildGiguVerdict(
+                status: .rejected,
+                message: "🗺️ MAPS TRÂNSITO: SÓ R$\(ganhoHoraStr)/h",
+                detailMetrics: "\(timeLabel) • R$ \(ganhoKmStr)/km",
+                speech: "Vermelha no trânsito! Só \(spokenHora)."
+            )
+        }
+        
         // PRIORIDADE 7: Exceção de Ouro (Avaliada com o ganho/hora real corrigido pelo Apple Maps se disponível)
         let isNewAccount = (ride.numeroViagensPassageiro != nil) && (ride.numeroViagensPassageiro! < settings.minViagensPassageiro)
         let matchedMarket = findMatchingKeyword(in: ride.enderecoBusca, keywords: settings.marketPickupKeywords)
@@ -629,7 +640,7 @@ final class RideRuleEngine {
             ((currentDailyNetProfit + lucroLiq) >= settings.metaDiariaLiquida)
         let metaIntStr = String(format: "%.0f", settings.metaDiariaLiquida)
         
-        if matchedMarket == nil && !isNewAccount &&
+        if matchedMarket == nil && !isNewAccount && !isMapsTrafficTrap &&
            effectiveGanhoHora >= settings.goldGanhoHora && ride.ganhoKm >= settings.goldGanhoKm && ride.valorTotal >= settings.minValorCorrida {
             let prefix: String = {
                 if willHitDailyGoal {

@@ -93,8 +93,11 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         
-        // Se o sintetizador já está falando na rua e ainda é a mesma corrida, NUNCA corta a fala no meio!
-        if !isSimulated && synthesizer.isSpeaking && isSamePriceWithinCooldown {
+        // Se o status mudou (ex: era Verde na Uber mas o Apple Maps detectou trânsito e virou Vermelha):
+        // Interrompe imediatamente a fala anterior e avisa a nova cor de emergência!
+        if didStatusFlip {
+            synthesizer.stopSpeaking(at: .immediate)
+        } else if !isSimulated && synthesizer.isSpeaking && isSamePriceWithinCooldown {
             return
         }
         
