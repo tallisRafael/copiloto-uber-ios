@@ -78,8 +78,12 @@ final class RideAssistantViewModel: ObservableObject {
     
     private var autoResetTimer: Timer?
     private var lastRecordedFingerprint: String = ""
+    private static let historyStorageKey = "uber_helper_ride_history_v2"
     
     init() {
+        // Carrega o histórico persistente de todas as chamadas salvas do dia
+        rideHistory = Self.loadHistoryFromDisk()
+        
         // Limpa falsos positivos que tenham sido gerados por cliques anteriores no Simulador
         if !UserDefaults.standard.bool(forKey: "did_clean_sim_pollution_v2") {
             AdaptiveLearningEngine.shared.clearAllLearnedData()
@@ -161,6 +165,33 @@ final class RideAssistantViewModel: ObservableObject {
             return false
         }
         return first.isAccepted
+    }
+    
+    // MARK: - Métricas de Todas as Chamadas Recebidas (Histórico do Turno)
+    
+    var totalChamadasRecebidas: Int {
+        rideHistory.count
+    }
+    
+    var totalValorOfertadoBruto: Double {
+        rideHistory.reduce(0.0) { $0 + $1.data.valorTotal }
+    }
+    
+    var totalChamadasAprovadas: Int {
+        rideHistory.filter { $0.verdict.status == .approved || $0.verdict.status == .goingHome }.count
+    }
+    
+    var totalChamadasCiladas: Int {
+        rideHistory.filter { $0.verdict.status == .rejected }.count
+    }
+    
+    var totalChamadasAtencao: Int {
+        rideHistory.filter { $0.verdict.status == .warning }.count
+    }
+    
+    var percentualCorridasBoas: Int {
+        guard !rideHistory.isEmpty else { return 0 }
+        return Int((Double(totalChamadasAprovadas) / Double(rideHistory.count)) * 100.0)
     }
     
     // MARK: - Processamento do OCR em 2 Estágios (1º Instantâneo + 2º Apple Maps)
@@ -312,6 +343,7 @@ final class RideAssistantViewModel: ObservableObject {
         
         if let index = rideHistory.firstIndex(where: { $0.data.fingerprint == extractedData.fingerprint }) {
             rideHistory[index].verdict = verdict
+            saveHistoryToDisk()
         }
         
         // Se o Apple Maps mudou o veredito (ex: era Aprovada na Uber, mas reprovou no trânsito real do Maps), avisa no áudio!
@@ -335,12 +367,13 @@ final class RideAssistantViewModel: ObservableObject {
             return
         }
         lastRecordedFingerprint = data.fingerprint
-        let item = RideHistoryItem(data: data, verdict: verdict, isAccepted: false)
+        let item = RideHistoryItem(data: data, verdict: verdict, isAccepted: false, timestamp: Date())
         rideHistory.insert(item, at: 0)
         
-        if rideHistory.count > 50 {
+        if rideHistory.count > 100 {
             rideHistory.removeLast()
         }
+        saveHistoryToDisk()
     }
     
     func toggleAccepted(for itemID: UUID) {
@@ -354,6 +387,12 @@ final class RideAssistantViewModel: ObservableObject {
             )
             learnedProfiles = AdaptiveLearningEngine.shared.sortedProfiles
         }
+        saveHistoryToDisk()
+    }
+    
+    func deleteHistoryItem(id: UUID) {
+        rideHistory.removeAll(where: { $0.id == id })
+        saveHistoryToDisk()
     }
     
     func toggleAcceptCurrentRide() {
@@ -367,6 +406,29 @@ final class RideAssistantViewModel: ObservableObject {
     func clearHistory() {
         rideHistory.removeAll()
         lastRecordedFingerprint = ""
+        saveHistoryToDisk()
+    }
+    
+    private func saveHistoryToDisk() {
+        do {
+            let data = try JSONEncoder().encode(rideHistory)
+            UserDefaults.standard.set(data, forKey: Self.historyStorageKey)
+        } catch {
+            print("Erro ao salvar histórico de corridas: \(error)")
+        }
+    }
+    
+    private static func loadHistoryFromDisk() -> [RideHistoryItem] {
+        guard let data = UserDefaults.standard.data(forKey: historyStorageKey) else {
+            return []
+        }
+        do {
+            let items = try JSONDecoder().decode([RideHistoryItem].self, from: data)
+            return items
+        } catch {
+            print("Erro ao restaurar histórico de corridas: \(error)")
+            return []
+        }
     }
     
     func clearLearnedProfiles() {

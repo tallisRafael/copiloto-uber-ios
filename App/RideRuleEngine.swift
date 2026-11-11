@@ -189,7 +189,7 @@ enum VerdictStatus: String, Codable, Equatable {
 }
 
 /// Resultado final da avaliação da corrida para alimentar a janela flutuante (PiP) no padrão visual GigU (3 Colunas Grandes)
-struct RideVerdict: Equatable {
+struct RideVerdict: Codable, Equatable {
     let status: VerdictStatus
     let message: String
     let detailMetrics: String
@@ -291,17 +291,31 @@ struct RideVerdict: Equatable {
 }
 
 /// Item salvo no histórico de corridas analisadas na sessão
-struct RideHistoryItem: Identifiable, Equatable {
+struct RideHistoryItem: Identifiable, Codable, Equatable {
     let id: UUID
+    let timestamp: Date
     let data: RideExtractedData
     var verdict: RideVerdict
     var isAccepted: Bool
     
-    init(data: RideExtractedData, verdict: RideVerdict, isAccepted: Bool = false) {
+    init(data: RideExtractedData, verdict: RideVerdict, isAccepted: Bool = false, timestamp: Date = Date()) {
         self.id = data.id
+        self.timestamp = timestamp
         self.data = data
         self.verdict = verdict
         self.isAccepted = isAccepted
+    }
+    
+    var formattedTime: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: timestamp)
+    }
+    
+    var formattedShortTime: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: timestamp)
     }
 }
 

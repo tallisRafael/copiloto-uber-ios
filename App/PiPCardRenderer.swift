@@ -186,3 +186,4 @@ enum PiPCardRenderer {
         (text as NSString).draw(with: drawRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs, context: nil)
     }
 }
+

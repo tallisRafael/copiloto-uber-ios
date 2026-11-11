@@ -45,16 +45,27 @@ struct SampleBufferLayerHostView: UIViewRepresentable {
 /// Abas principais na barra inferior nativa do iOS (`TabView`)
 private enum MainTab: Hashable {
     case cockpit
-    case goalAndHistory
+    case history
+    case goal
     case simulator
     case settingsAndAI
 }
 
-/// Tela principal com Design Automotivo Dark Mode e Navegação Nativa em 4 Abas
+private enum HistoryFilter: String, CaseIterable, Identifiable {
+    case all = "Todas"
+    case accepted = "Aceitas"
+    case rejected = "Ciladas"
+    
+    var id: String { rawValue }
+}
+
+/// Tela principal com Design Automotivo Dark Mode e Navegação Nativa em 5 Abas
 struct ContentView: View {
     @StateObject private var viewModel = RideAssistantViewModel()
     @State private var activeTab: MainTab = .cockpit
     @State private var broadcastTriggerCount: Int = 0
+    @State private var historyFilter: HistoryFilter = .all
+    @State private var showClearHistoryAlert: Bool = false
     
     @State private var newDangerKeyword: String = ""
     @State private var newBlacklistKeyword: String = ""
@@ -74,9 +85,21 @@ struct ContentView: View {
             }
             .tag(MainTab.cockpit)
             
-            // ABA 2: META 250+ & HISTÓRICO DE CORRIDAS
+            // ABA 2: HISTÓRICO DE TODAS AS CHAMADAS DA UBER
             NavigationView {
-                goalAndHistoryTabView
+                historyTabView
+                    .navigationTitle("Histórico de Chamadas")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("Histórico", systemImage: "clock.arrow.circlepath")
+            }
+            .tag(MainTab.history)
+            
+            // ABA 3: META 250+ & FATURAMENTO DO DIA
+            NavigationView {
+                goalTabView
                     .navigationTitle("Meta 250+ & Turno")
                     .navigationBarTitleDisplayMode(.inline)
             }
@@ -84,9 +107,9 @@ struct ContentView: View {
             .tabItem {
                 Label("Meta 250+", systemImage: "flame.fill")
             }
-            .tag(MainTab.goalAndHistory)
+            .tag(MainTab.goal)
             
-            // ABA 3: SIMULADOR DE ROTAS (MARINGÁ • SARANDI • MARIALVA)
+            // ABA 4: SIMULADOR DE ROTAS (MARINGÁ • SARANDI • MARIALVA)
             NavigationView {
                 simulatorTabView
                     .navigationTitle("Simulador de Rotas")
@@ -98,7 +121,7 @@ struct ContentView: View {
             }
             .tag(MainTab.simulator)
             
-            // ABA 4: AJUSTES, LISTAS E IA LOCAL
+            // ABA 5: AJUSTES, LISTAS E IA LOCAL
             NavigationView {
                 settingsAndAITabView
                     .navigationTitle("Ajustes & IA")
@@ -139,7 +162,7 @@ struct ContentView: View {
                     
                     // Mini Pílula da Meta 250+ (Toque leva para a aba Meta 250+)
                     Button {
-                        activeTab = .goalAndHistory
+                        activeTab = .goal
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: viewModel.isMetaDiariaBatida ? "trophy.fill" : "flame.fill")
@@ -440,9 +463,270 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - ABA 2: Termômetro da Meta 250+ & Histórico do Turno
+    // MARK: - ABA 2: Histórico Completo de Chamadas da Uber (Aceitas, Recusadas e Ciladas)
     
-    private var goalAndHistoryTabView: some View {
+    private var historyTabView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Card de Panorama Estatístico do Turno
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label("PANORAMA DE CHAMADAS (HOJE)", systemImage: "chart.bar.fill")
+                            .font(.caption.bold())
+                            .foregroundColor(.cyan)
+                        Spacer()
+                        if !viewModel.rideHistory.isEmpty {
+                            Button(role: .destructive) {
+                                showClearHistoryAlert = true
+                            } label: {
+                                Label("Limpar", systemImage: "trash")
+                                    .font(.caption.bold())
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    HStack {
+                        summaryStat(title: "Chamadas", value: "\(viewModel.totalChamadasRecebidas)")
+                        Spacer()
+                        summaryStat(title: "Filé (Boas)", value: "\(viewModel.percentualCorridasBoas)%")
+                        Spacer()
+                        summaryStat(title: "Ofertado", value: formatCurrency(viewModel.totalValorOfertadoBruto))
+                        Spacer()
+                        summaryStat(title: "Aceitas", value: "\(viewModel.acceptedRides.count)")
+                    }
+                }
+                .padding(16)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(16)
+                
+                // Seletor Segmentado de Filtro
+                Picker("Filtro do Histórico", selection: $historyFilter) {
+                    Text("Todas (\(viewModel.rideHistory.count))").tag(HistoryFilter.all)
+                    Text("Aceitas (\(viewModel.acceptedRides.count))").tag(HistoryFilter.accepted)
+                    Text("Ciladas (\(viewModel.totalChamadasCiladas + viewModel.totalChamadasAtencao))").tag(HistoryFilter.rejected)
+                }
+                .pickerStyle(.segmented)
+                
+                // Lista Filtrada de Corridas
+                let items = filteredHistoryItems
+                if items.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: historyFilter == .accepted ? "checkmark.circle" : "clock.arrow.circlepath")
+                            .font(.system(size: 44))
+                            .foregroundColor(.secondary)
+                        Text(emptyHistoryMessage)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(16)
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(items) { item in
+                            historyRideCard(item: item)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .alert(isPresented: $showClearHistoryAlert) {
+            Alert(
+                title: Text("Limpar Histórico de Chamadas?"),
+                message: Text("Isso apagará todas as corridas registradas no histórico do turno. O faturamento diário das aceitas também será zerado."),
+                primaryButton: .destructive(Text("Limpar Tudo")) {
+                    viewModel.clearHistory()
+                },
+                secondaryButton: .cancel(Text("Cancelar"))
+            )
+        }
+    }
+    
+    private var filteredHistoryItems: [RideHistoryItem] {
+        switch historyFilter {
+        case .all:
+            return viewModel.rideHistory
+        case .accepted:
+            return viewModel.rideHistory.filter { $0.isAccepted }
+        case .rejected:
+            return viewModel.rideHistory.filter { !$0.isAccepted }
+        }
+    }
+    
+    private var emptyHistoryMessage: String {
+        switch historyFilter {
+        case .all:
+            return "Nenhuma chamada registrada hoje.\nQuando a Uber chamar, cada corrida ficará guardada aqui automaticamente, com semáforo, lucro e rota."
+        case .accepted:
+            return "Nenhuma corrida aceita ainda.\nVocê pode aceitar na Uber ou tocar em 'Somar na Meta' em qualquer chamada do histórico."
+        case .rejected:
+            return "Nenhuma corrida recusada ou cilada até o momento."
+        }
+    }
+    
+    private func historyRideCard(item: RideHistoryItem) -> some View {
+        let lucroItem = item.data.lucroLiquido(custoPorKm: viewModel.settings.custoPorKm)
+        let custoItem = item.data.custoOperacional(custoPorKm: viewModel.settings.custoPorKm)
+        
+        return VStack(alignment: .leading, spacing: 10) {
+            // Linha 1: Status Colorido + Horário + Veredito + Badge
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(item.verdict.backgroundColor)
+                    .frame(width: 12, height: 12)
+                
+                Text(item.formattedTime)
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyan)
+                
+                Text(item.verdict.message)
+                    .font(.subheadline.bold())
+                    .lineLimit(1)
+                
+                Spacer()
+                
+                if let badge = item.verdict.passengerBadge {
+                    Text(badge)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(.tertiarySystemBackground))
+                        .cornerRadius(4)
+                }
+            }
+            
+            Divider()
+            
+            // Linha 2: Valores Financeiros (Bruto | Líquido | Gasolina)
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("VALOR BRUTO")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                    Text(formatCurrency(item.data.valorTotal))
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("LUCRO LÍQUIDO")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                    Text(formatCurrency(lucroItem))
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .foregroundColor(lucroItem > 0 ? .green : .red)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("GASOLINA")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                    Text("- " + formatCurrency(custoItem))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.orange)
+                }
+            }
+            
+            // Linha 3: Índices Unitários (R$/km | R$/h | Total KM | Tempo)
+            HStack(spacing: 12) {
+                Label(item.verdict.ganhoPorKmText, systemImage: "speedometer")
+                    .font(.caption.bold())
+                    .foregroundColor(.cyan)
+                
+                Label(item.verdict.ganhoPorHoraText, systemImage: "clock")
+                    .font(.caption.bold())
+                    .foregroundColor(.mint)
+                
+                Spacer()
+                
+                Text(String(format: "%.1f km • %.0f min", item.data.kmTotal, item.data.tempoTotal).replacingOccurrences(of: ".", with: ","))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.vertical, 2)
+            
+            // Linha 4: Rota (Busca e Destino)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Image(systemName: "figure.walk")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text("Busca: \(String(format: "%.0f min", item.data.tempoBusca)) (\(String(format: "%.1f km", item.data.kmBusca).replacingOccurrences(of: ".", with: ",")))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    
+                    Text("•")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    
+                    Image(systemName: "car.fill")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text("Viagem: \(String(format: "%.0f min", item.data.tempoViagem)) (\(String(format: "%.1f km", item.data.kmViagem).replacingOccurrences(of: ".", with: ",")))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                
+                HStack(alignment: .top, spacing: 4) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                    Text(item.data.enderecoDestino)
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(8)
+            .background(Color(.tertiarySystemBackground).opacity(0.6))
+            .cornerRadius(8)
+            
+            // Linha 5: Botão de Aceite / Contabilização na Meta
+            Button {
+                viewModel.toggleAccepted(for: item.id)
+            } label: {
+                HStack {
+                    Image(systemName: item.isAccepted ? "checkmark.circle.fill" : "plus.circle")
+                        .font(.subheadline.bold())
+                    Text(item.isAccepted ? "Corrida Aceita (Somada na Meta 250+)" : "Toque para Somar na Meta")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    if item.isAccepted {
+                        Text("+ " + formatCurrency(lucroItem))
+                            .font(.caption.bold())
+                            .foregroundColor(.green)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(item.isAccepted ? Color.green.opacity(0.2) : Color(.tertiarySystemBackground))
+                .foregroundColor(item.isAccepted ? .green : .secondary)
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(item.isAccepted ? Color.green.opacity(0.4) : Color.clear, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(14)
+    }
+    
+    // MARK: - ABA 3: Termômetro da Meta 250+ Diária
+    
+    private var goalTabView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 // Card Principal da Meta 250+
@@ -508,37 +792,61 @@ struct ContentView: View {
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(16)
                 
-                // Lista de Ofertas Recebidas
+                // Atalho para o Histórico Completo de Chamadas
+                Button {
+                    activeTab = .history
+                } label: {
+                    HStack {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.headline)
+                            .foregroundColor(.cyan)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Ver Todas as Chamadas Recebidas (\(viewModel.totalChamadasRecebidas))")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.white)
+                            Text("\(viewModel.acceptedRides.count) aceitas • \(viewModel.totalChamadasCiladas + viewModel.totalChamadasAtencao) recusadas/ciladas")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(14)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+                }
+                .buttonStyle(.plain)
+                
+                // Lista de Corridas Aceitas no Turno
                 HStack {
-                    Text("HISTÓRICO DE CHAMADAS (\(viewModel.rideHistory.count))")
+                    Text("CORRIDAS ACEITAS NO DIA (\(viewModel.acceptedRides.count))")
                         .font(.caption.bold())
                         .foregroundColor(.secondary)
-                    
                     Spacer()
-                    
-                    if !viewModel.rideHistory.isEmpty {
-                        Button("Zerar Turno", role: .destructive) {
-                            viewModel.clearHistory()
-                        }
-                        .font(.caption.bold())
-                    }
                 }
                 
-                if viewModel.rideHistory.isEmpty {
+                if viewModel.acceptedRides.isEmpty {
                     VStack(spacing: 8) {
-                        Image(systemName: "car.2.fill")
+                        Image(systemName: "flame")
                             .font(.largeTitle)
                             .foregroundColor(.secondary)
-                        Text("Nenhuma corrida registrada neste turno.")
-                            .font(.subheadline)
+                        Text("Nenhuma corrida aceita ainda hoje.")
+                            .font(.subheadline.bold())
                             .foregroundColor(.secondary)
+                        Text("Quando você aceitar uma corrida ou tocar em 'Somar' no histórico, ela somará aqui na sua meta.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 32)
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(14)
                 } else {
-                    ForEach(viewModel.rideHistory) { item in
+                    ForEach(viewModel.acceptedRides) { item in
                         let lucroItem = item.data.lucroLiquido(custoPorKm: viewModel.settings.custoPorKm)
                         HStack(spacing: 12) {
                             Circle()
@@ -547,6 +855,9 @@ struct ContentView: View {
                             
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
+                                    Text(item.formattedShortTime)
+                                        .font(.caption.bold())
+                                        .foregroundColor(.cyan)
                                     Text(item.verdict.message)
                                         .font(.subheadline.bold())
                                     Spacer()
@@ -574,12 +885,12 @@ struct ContentView: View {
                                 viewModel.toggleAccepted(for: item.id)
                             } label: {
                                 VStack(spacing: 3) {
-                                    Image(systemName: item.isAccepted ? "checkmark.circle.fill" : "circle")
+                                    Image(systemName: "checkmark.circle.fill")
                                         .font(.system(size: 22))
-                                    Text(item.isAccepted ? "Aceita" : "Somar")
+                                    Text("Aceita")
                                         .font(.system(size: 10, weight: .bold))
                                 }
-                                .foregroundColor(item.isAccepted ? .green : .secondary)
+                                .foregroundColor(.green)
                             }
                             .buttonStyle(.plain)
                         }

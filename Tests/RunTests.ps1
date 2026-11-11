@@ -1,4 +1,4 @@
-﻿# Suíte Completa de Testes + Simulação de Probabilidade (Maringá • Sarandi • Marialva + Meta 250+)
+# Suíte Completa de Testes + Simulação de Probabilidade (Maringá • Sarandi • Marialva + Meta 250+)
 $ErrorActionPreference = "Stop"
 
 function Parse-RideOCR([string]$rawText) {
