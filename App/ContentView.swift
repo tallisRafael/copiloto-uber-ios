@@ -378,6 +378,31 @@ struct ContentView: View {
                             }
                         }
                     }
+                    
+                    // Seletor do Tom da Voz quando a Voz estiver ativa
+                    if viewModel.audioAlertMode == .voice {
+                        HStack(spacing: 8) {
+                            ForEach(DriverVoiceType.allCases) { vType in
+                                let isVSelected = (viewModel.driverVoiceType == vType)
+                                Button {
+                                    viewModel.driverVoiceType = vType
+                                } label: {
+                                    Text(vType.rawValue)
+                                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 8)
+                                        .background(isVSelected ? Color.green.opacity(0.22) : Color(.tertiarySystemBackground))
+                                        .foregroundColor(isVSelected ? .green : .secondary)
+                                        .cornerRadius(8)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(isVSelected ? Color.green : Color.clear, lineWidth: 1)
+                                        )
+                                }
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
                 }
                 
                 // Card de Pausa / Café compacto

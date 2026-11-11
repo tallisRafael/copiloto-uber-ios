@@ -3,6 +3,15 @@ import AVFoundation
 import AudioToolbox
 import UserNotifications
 
+/// Tipos de voz selecionáveis para falar os alertas
+enum DriverVoiceType: String, CaseIterable, Codable, Identifiable {
+    case femaleNatural = "Feminina Suave"
+    case maleFelipe = "Masculina (Felipe)"
+    case systemAuto = "Automática (iOS)"
+    
+    var id: String { rawValue }
+}
+
 /// Modos de alerta sonoro disponíveis para o motorista
 enum AudioAlertMode: String, CaseIterable, Codable, Identifiable {
     case off = "Silencioso"
@@ -62,7 +71,8 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
         mode: AudioAlertMode,
         verdict: RideVerdict,
         fingerprint: String,
-        isSimulated: Bool = false
+        isSimulated: Bool = false,
+        voiceType: DriverVoiceType = .maleFelipe
     ) {
         let status = verdict.status
         guard status != .waiting else { return }
@@ -109,9 +119,9 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
             // Apenas o Bipe do sistema: zero voz
             playSystemBeep(for: status)
         case .voice:
-            // Apenas a Voz da Siri: zero bipe
+            // Apenas a Voz da Siri / Felipe: zero bipe
             if let text = verdict.speechText, !text.isEmpty {
-                speakGiguStyle(text, forceInterrupt: isSimulated)
+                speakGiguStyle(text, forceInterrupt: isSimulated, voiceType: voiceType)
             }
         }
     }
@@ -129,31 +139,42 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
     
-    /// Seleciona a melhor voz em pt-BR disponível no iOS 18
-    private func selectNaturalSiriVoice() -> AVSpeechSynthesisVoice? {
+    /// Seleciona a voz em pt-BR de acordo com a preferência do motorista
+    private func selectConfiguredVoice(preferredType: DriverVoiceType = .maleFelipe) -> AVSpeechSynthesisVoice? {
         let allVoices = AVSpeechSynthesisVoice.speechVoices()
-        let ptBrVoices = allVoices.filter { $0.language == "pt-BR" || $0.language.hasPrefix("pt") }
+        let ptVoices = allVoices.filter { $0.language == "pt-BR" || $0.language.hasPrefix("pt") }
         
-        // 1. Vozes da Siri / Premium / Enhanced no iOS 18
-        if let siriVoice = ptBrVoices.first(where: {
-            $0.identifier.localizedCaseInsensitiveContains("siri") ||
-            $0.quality == .premium ||
-            $0.quality == .enhanced
-        }) {
-            return siriVoice
+        switch preferredType {
+        case .maleFelipe:
+            // 1. Procura primeiro por vozes masculinas naturais (Felipe, Daniel ou Siri masculina)
+            if let male = ptVoices.first(where: {
+                $0.name.localizedCaseInsensitiveContains("felipe") ||
+                $0.name.localizedCaseInsensitiveContains("daniel") ||
+                $0.gender == .male
+            }) {
+                return male
+            }
+        case .femaleNatural:
+            // Procura voz feminina aprimorada (não compacta/robô)
+            if let female = ptVoices.first(where: {
+                ($0.quality == .premium || $0.quality == .enhanced) && $0.gender == .female
+            }) {
+                return female
+            }
+        case .systemAuto:
+            break
         }
         
-        // 2. Voz padrão pt-BR instalada nativamente
-        if let defaultPt = AVSpeechSynthesisVoice(language: "pt-BR") {
-            return defaultPt
+        // Vozes Siri ou aprimoradas do iOS
+        if let enhanced = ptVoices.first(where: { $0.quality == .premium || $0.quality == .enhanced }) {
+            return enhanced
         }
         
-        // 3. Fallback seguro para qualquer voz pt
-        return ptBrVoices.first
+        // Padrão do sistema pt-BR
+        return AVSpeechSynthesisVoice(language: "pt-BR") ?? ptVoices.first
     }
     
-    private func speakGiguStyle(_ text: String, forceInterrupt: Bool) {
-        // Assegura que a sessão de áudio do sistema está ativa para reproduzir a voz
+    private func speakGiguStyle(_ text: String, forceInterrupt: Bool, voiceType: DriverVoiceType = .maleFelipe) {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .voicePrompt, options: [.mixWithOthers, .duckOthers])
@@ -167,11 +188,11 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
         }
         
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = selectNaturalSiriVoice()
+        utterance.voice = selectConfiguredVoice(preferredType: voiceType)
         
-        // Velocidade 0.50 e pitch natural
-        utterance.rate = 0.50
-        utterance.pitchMultiplier = 1.0
+        // Modulação confortável: velocidade 0.48 com pitch 0.95 = voz encorpada, rápida e natural
+        utterance.rate = 0.48
+        utterance.pitchMultiplier = 0.96
         utterance.volume = 1.0
         
         synthesizer.speak(utterance)

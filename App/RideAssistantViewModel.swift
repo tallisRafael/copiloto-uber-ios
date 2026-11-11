@@ -49,6 +49,19 @@ final class RideAssistantViewModel: ObservableObject {
         }
     }
     
+    /// Voz selecionada para os alertas (Felipe Masculina, Feminina Suave ou Automática)
+    @Published var driverVoiceType: DriverVoiceType = {
+        if let saved = UserDefaults.standard.string(forKey: "uber_helper_voice_type"),
+           let type = DriverVoiceType(rawValue: saved) {
+            return type
+        }
+        return .maleFelipe
+    }() {
+        didSet {
+            UserDefaults.standard.set(driverVoiceType.rawValue, forKey: "uber_helper_voice_type")
+        }
+    }
+    
     /// Configurações personalizáveis do motorista (Custos, Metas e Listas Geográficas)
     @Published var settings: RideSettings = RideSettings.load() {
         didSet {
@@ -207,7 +220,8 @@ final class RideAssistantViewModel: ObservableObject {
                     mode: self.audioAlertMode,
                     verdict: initialVerdict,
                     fingerprint: extractedData.fingerprint,
-                    isSimulated: isSimulated
+                    isSimulated: isSimulated,
+                    voiceType: self.driverVoiceType
                 )
                 
                 // Toda vez que tocar uma NOVA corrida, faz uma nova consulta AO VIVO do trânsito no Apple Maps!
@@ -306,7 +320,8 @@ final class RideAssistantViewModel: ObservableObject {
                 mode: audioAlertMode,
                 verdict: verdict,
                 fingerprint: extractedData.fingerprint,
-                isSimulated: false
+                isSimulated: false,
+                voiceType: driverVoiceType
             )
         }
         
