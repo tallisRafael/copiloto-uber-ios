@@ -129,12 +129,12 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
     
-    /// Seleciona a melhor voz natural da Siri disponível em pt-BR no iOS 18 / iPhone 16
+    /// Seleciona a melhor voz em pt-BR disponível no iOS 18
     private func selectNaturalSiriVoice() -> AVSpeechSynthesisVoice? {
         let allVoices = AVSpeechSynthesisVoice.speechVoices()
-        let ptBrVoices = allVoices.filter { $0.language == "pt-BR" }
+        let ptBrVoices = allVoices.filter { $0.language == "pt-BR" || $0.language.hasPrefix("pt") }
         
-        // 1. Procura primeiro pelas vozes da Siri ou Vozes Premium/Enhanced instaladas no iOS
+        // 1. Vozes da Siri / Premium / Enhanced no iOS 18
         if let siriVoice = ptBrVoices.first(where: {
             $0.identifier.localizedCaseInsensitiveContains("siri") ||
             $0.quality == .premium ||
@@ -143,32 +143,36 @@ final class SpeechManager: NSObject, UNUserNotificationCenterDelegate {
             return siriVoice
         }
         
-        // 2. Fallback para voz feminina natural padrão do iOS pt-BR (Luciana/Francisca ou padrão)
+        // 2. Voz padrão pt-BR instalada nativamente
         if let defaultPt = AVSpeechSynthesisVoice(language: "pt-BR") {
             return defaultPt
         }
         
-        return AVSpeechSynthesisVoice(identifier: AVSpeechSynthesisVoiceIdentifierAlex)
+        // 3. Fallback seguro para qualquer voz pt
+        return ptBrVoices.first
     }
     
     private func speakGiguStyle(_ text: String, forceInterrupt: Bool) {
-        // Se for corrida na rua e já estiver terminando uma frase recente (< 2.5s), deixa concluir sem engasgar
+        // Assegura que a sessão de áudio do sistema está ativa para reproduzir a voz
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .voicePrompt, options: [.mixWithOthers, .duckOthers])
+            try session.setActive(true)
+        } catch {
+            print("[SpeechManager] Erro AVAudioSession: \(error)")
+        }
+        
         if synthesizer.isSpeaking {
-            if forceInterrupt {
-                synthesizer.stopSpeaking(at: .immediate)
-            } else {
-                synthesizer.stopSpeaking(at: .word)
-            }
+            synthesizer.stopSpeaking(at: .immediate)
         }
         
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = selectNaturalSiriVoice()
         
-        // Velocidade 0.49 e pitch natural = entonação humana da Siri, sem soar como robô
-        utterance.rate = 0.49
-        utterance.pitchMultiplier = 1.02
+        // Velocidade 0.50 e pitch natural
+        utterance.rate = 0.50
+        utterance.pitchMultiplier = 1.0
         utterance.volume = 1.0
-        utterance.preUtteranceDelay = 0.15 // Pequeno intervalo para o bipe tocar cristalino antes da fala
         
         synthesizer.speak(utterance)
     }

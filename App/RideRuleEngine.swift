@@ -573,7 +573,27 @@ final class RideRuleEngine {
             )
         }
         
-        // PRIORIDADE 6: Modo "Rumo a Casa" ou Retorno de Sarandi/Marialva -> Maringá
+        // PRIORIDADE 6.1: Alertas de Embarque em Supermercado / Atacadão (Antes de qualquer aprovação!)
+        if let matchedMarket = findMatchingKeyword(in: ride.enderecoBusca, keywords: settings.marketPickupKeywords) {
+            return buildGiguVerdict(
+                status: .warning,
+                message: "🛒 EMBARQUE: \(matchedMarket.uppercased())",
+                detailMetrics: "Possível compra/sacolas • R$ \(ganhoKmStr)/km",
+                speech: "Amarela! Embarque em mercado \(matchedMarket), \(spokenKm)."
+            )
+        }
+        
+        // PRIORIDADE 6.2: Alerta de Conta Nova / Poucas Viagens (Antes de qualquer aprovação!)
+        if let trips = ride.numeroViagensPassageiro, trips < settings.minViagensPassageiro {
+            return buildGiguVerdict(
+                status: .warning,
+                message: "🛡️ CONTA NOVA (\(trips) VIAGENS)",
+                detailMetrics: "R$ \(ganhoKmStr)/km | \(metricsSummary)",
+                speech: "Amarela! Passageiro conta nova, só \(trips) viagens. \(spokenKm)."
+            )
+        }
+        
+        // PRIORIDADE 6.5: Modo "Rumo a Casa" ou Retorno de Sarandi/Marialva -> Maringá
         if (isGoingHomeModeEnabled || isReturningFromOutskirts),
            let matchedHome = findMatchingKeyword(in: ride.enderecoDestino, keywords: settings.favoriteHomeKeywords),
            ride.ganhoKm >= settings.minGanhoKmRumoACasa,
@@ -588,8 +608,8 @@ final class RideRuleEngine {
         }
         
         // PRIORIDADE 7: Exceção de Ouro (Avaliada com o ganho/hora real corrigido pelo Apple Maps se disponível)
-        let matchedMarket = findMatchingKeyword(in: ride.enderecoBusca, keywords: settings.marketPickupKeywords)
         let isNewAccount = (ride.numeroViagensPassageiro != nil) && (ride.numeroViagensPassageiro! < settings.minViagensPassageiro)
+        let matchedMarket = findMatchingKeyword(in: ride.enderecoBusca, keywords: settings.marketPickupKeywords)
         let willHitDailyGoal = (currentDailyNetProfit > 0.0) &&
             (currentDailyNetProfit < settings.metaDiariaLiquida) &&
             ((currentDailyNetProfit + lucroLiq) >= settings.metaDiariaLiquida)
@@ -606,13 +626,20 @@ final class RideRuleEngine {
                 }
                 return (mapVerification?.uberOverestimatedTime == true) ? "🗺️ MAPS TOP" : "CORRIDA TOP"
             }()
+            let goldSpeech: String = {
+                if willHitDailyGoal {
+                    return "Verde top! Bate a meta de \(metaIntStr)! \(spokenKm), \(spokenLucro)."
+                }
+                if mapVerification?.uberOverestimatedTime == true {
+                    return "Azul! Livre no Maps! \(spokenKm), \(spokenHora)."
+                }
+                return "Verde top! \(spokenKm), \(spokenHora), \(spokenLucro)."
+            }()
             return buildGiguVerdict(
-                status: .approved,
+                status: (mapVerification?.uberOverestimatedTime == true) ? .goingHome : .approved,
                 message: "\(prefix): R$\(ganhoKmStr)/km",
                 detailMetrics: "R$ \(ganhoHoraStr)/h • \(metricsSummary)",
-                speech: willHitDailyGoal
-                    ? "Verde top! Bate a meta de \(metaIntStr)! \(spokenKm), \(spokenLucro)."
-                    : "Verde top! \(spokenKm), \(spokenHora), \(spokenLucro)."
+                speech: goldSpeech
             )
         }
         
@@ -649,35 +676,21 @@ final class RideRuleEngine {
                     speech: "Vermelha no trânsito! Só \(spokenHora)."
                 )
             } else {
-                let prefix = (mapVerification?.uberOverestimatedTime == true) ? "🗺️ LIVRE NO MAPS" : "APROVADA NO TRÂNSITO"
+                let isMapsOverride = (mapVerification?.uberOverestimatedTime == true)
+                let prefix = isMapsOverride ? "🗺️ LIVRE NO MAPS" : "APROVADA NO TRÂNSITO"
+                let trafficSpeech = isMapsOverride
+                    ? "Azul! Livre no Maps! \(spokenHora), \(spokenLucro)."
+                    : "Verde! Livre no trânsito, \(spokenHora), \(spokenLucro)."
                 return buildGiguVerdict(
-                    status: .approved,
+                    status: isMapsOverride ? .goingHome : .approved,
                     message: prefix,
                     detailMetrics: "R$ \(ganhoHoraStr)/h | \(metricsSummary)",
-                    speech: "Verde! Livre no trânsito, \(spokenHora), \(spokenLucro)."
+                    speech: trafficSpeech
                 )
             }
         }
         
-        // PRIORIDADE 11: Alertas Amarelos de Rua (Embarque em Supermercado/Atacadão, Conta Nova < 15 viagens, Nota em aviso ou Ganhos Medianos)
-        if let matchedMarket = findMatchingKeyword(in: ride.enderecoBusca, keywords: settings.marketPickupKeywords) {
-            return buildGiguVerdict(
-                status: .warning,
-                message: "🛒 EMBARQUE: \(matchedMarket.uppercased())",
-                detailMetrics: "Possível compra/sacolas • R$ \(ganhoKmStr)/km",
-                speech: "Amarela! Embarque em mercado \(matchedMarket), \(spokenKm)."
-            )
-        }
-        
-        if let trips = ride.numeroViagensPassageiro, trips < settings.minViagensPassageiro {
-            return buildGiguVerdict(
-                status: .warning,
-                message: "🛡️ CONTA NOVA (\(trips) VIAGENS)",
-                detailMetrics: "R$ \(ganhoKmStr)/km | \(metricsSummary)",
-                speech: "Amarela! Conta nova, só \(trips) viagens. \(spokenKm)."
-            )
-        }
-        
+        // PRIORIDADE 11: Alertas Amarelos de Rua (Nota em aviso ou Ganhos Medianos)
         if let nota = ride.notaPassageiro, nota < settings.minNotaPassageiro {
             let notaStr = String(format: "%.2f", nota).replacingOccurrences(of: ".", with: ",")
             return buildGiguVerdict(
