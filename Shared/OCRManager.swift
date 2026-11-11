@@ -91,7 +91,19 @@ final class OCRManager {
                         observation.topCandidates(1).first?.string
                     }
                     
-                    let fullText = recognizedLines.joined(separator: "\n")
+                    // FILTRO CRÍTICO ANTI-FEEDBACK LOOP:
+                    // Remove do OCR qualquer linha que venha do nosso próprio PiP ou Banner de Notificação,
+                    // evitando que o app leia a si mesmo em loop infinito e infle os números!
+                    let filteredLines = recognizedLines.filter { line in
+                        let up = line.uppercased()
+                        if up.contains("GANHO / KM") || up.contains("GANHO / HORA") || up.contains("LUCRO LIVRE") { return false }
+                        if up.contains("CILADA:") || up.contains("PERIGO:") || up.contains("CORRIDA TOP") || up.contains("BATE OS") { return false }
+                        if up.contains("LÍQ R$") || up.contains("LIQ R$") || up.contains("HOJE LÍQ") { return false }
+                        if up.contains("COPILOTO UBER") || up.contains("AGUARDANDO CORRIDA") { return false }
+                        return true
+                    }
+                    
+                    let fullText = filteredLines.joined(separator: "\n")
                     let lowerText = fullText.lowercased()
                     
                     // Verifica se há um card de oferta de corrida na tela ("R$" + "km")
@@ -109,7 +121,8 @@ final class OCRManager {
                 // Ignora textos minúsculos de nomes de ruas no mapa de fundo, focando nas letras do card (2x mais rápido e menos calor!)
                 request.minimumTextHeight = 0.018
                 request.recognitionLanguages = ["pt-BR", "en-US"]
-                request.regionOfInterest = CGRect(x: 0.0, y: 0.0, width: 1.0, height: 0.75)
+                // Foca apenas na metade inferior da tela onde o card da Uber sobe (ignora topo com notificações e PiP flutuante no topo)
+                request.regionOfInterest = CGRect(x: 0.0, y: 0.0, width: 1.0, height: 0.65)
                 
                 let requestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
                 do {

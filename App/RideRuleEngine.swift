@@ -311,16 +311,27 @@ final class RideRuleEngine {
     // MARK: - 1. Extração via Regex (Parser do OCR)
     
     func parseOCRText(_ rawText: String) -> RideExtractedData? {
+        // FILTRO DE SEGURANÇA 1: Limpa linhas residuais do próprio PiP/Notificação caso vazem no texto
+        var cleanedLines: [String] = []
+        for line in rawText.components(separatedBy: .newlines) {
+            let up = line.uppercased()
+            if up.contains("CILADA:") || up.contains("PERIGO:") || up.contains("CORRIDA TOP") || up.contains("BATE OS") { continue }
+            if up.contains("GANHO / KM") || up.contains("GANHO / HORA") || up.contains("LUCRO LIVRE") { continue }
+            if up.contains("BUSCA ") && (up.contains("LÍQ R$") || up.contains("LIQ R$") || up.contains("MIN (")) { continue }
+            cleanedLines.append(line)
+        }
+        let sanitizedText = cleanedLines.joined(separator: "\n")
+        
         // 1. Extrair o Valor Total (R$ XX,XX ou RS XX,XX) ignorando valores seguidos por "/km" ou "/h"
         let pricePattern = #"R[\$S]\s*[\r\n]*\s*(\d+[.,]\d{2})(?!\s*\/?\s*(?:km|h))"#
-        guard let valorTotal = extractFirstDouble(pattern: pricePattern, in: rawText) else {
+        guard let valorTotal = extractFirstDouble(pattern: pricePattern, in: sanitizedText) else {
             return nil
         }
         
         // 2. Extrair os blocos de Tempo (Horas opcionais + Minutos) + Distância + Endereço:
         // 1º bloco = Ir buscar o passageiro | 2º bloco = Levar o passageiro ao destino
         let legPattern = #"(?:(\d+)\s*h(?:oras?)?\s*)?(\d+)\s*(?:min(?:utos?)?\.?)\s*[\r\n]*\s*\(\s*(\d+(?:[.,]\d+)?)\s*km\s*\)\s*[\r\n]*\s*([^\r\n]+)"#
-        let legs = extractRideLegs(pattern: legPattern, in: rawText)
+        let legs = extractRideLegs(pattern: legPattern, in: sanitizedText)
         
         guard legs.count >= 2 else {
             return nil
@@ -329,17 +340,22 @@ final class RideRuleEngine {
         let pickupLeg = legs[0]
         let tripLeg = legs[1]
         
+        // FILTRO DE SANIDADE: Valores absurdos gerados por feedback loop de tela (ex: busca > 40km ou tempo > 180min)
+        if pickupLeg.kilometers > 40.0 || tripLeg.kilometers > 100.0 || pickupLeg.minutes > 120.0 {
+            return nil
+        }
+        
         // 3. Checar se o texto contém a palavra "parada" ou "paradas"
         let stopPattern = #"\bparadas?\b"#
-        let temParada = rawText.range(of: stopPattern, options: [.regularExpression, .caseInsensitive]) != nil
+        let temParada = sanitizedText.range(of: stopPattern, options: [.regularExpression, .caseInsensitive]) != nil
         
         // 4. Extrair Nota do Passageiro, Número de Avaliações entre parênteses "(254)" e Selo Verificado
-        let ratingInfo = extractPassengerRatingAndTrips(in: rawText)
-        let passageiroVerificado = rawText.range(of: #"\bverificado\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+        let ratingInfo = extractPassengerRatingAndTrips(in: sanitizedText)
+        let passageiroVerificado = sanitizedText.range(of: #"\bverificado\b"#, options: [.regularExpression, .caseInsensitive]) != nil
         
         // 5. Detectar se a corrida é paga em Dinheiro / Espécie
         let cashPattern = #"\b(?:dinheiro|esp[eé]cie|troco)\b"#
-        let pagamentoEmDinheiro = rawText.range(of: cashPattern, options: [.regularExpression, .caseInsensitive]) != nil
+        let pagamentoEmDinheiro = sanitizedText.range(of: cashPattern, options: [.regularExpression, .caseInsensitive]) != nil
         
         return RideExtractedData(
             valorTotal: valorTotal,
