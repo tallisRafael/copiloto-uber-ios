@@ -661,7 +661,7 @@ struct ContentView: View {
                     Image(systemName: "figure.walk")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Text("Busca: \(String(format: "%.0f min", item.data.tempoBusca)) (\(String(format: "%.1f km", item.data.kmBusca).replacingOccurrences(of: ".", with: ",")))")
+                    Text("Busca: \(String(format: "%.0f min", item.data.tempoBuscaMin)) (\(String(format: "%.1f km", item.data.kmBusca).replacingOccurrences(of: ".", with: ",")))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     
@@ -672,7 +672,7 @@ struct ContentView: View {
                     Image(systemName: "car.fill")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Text("Viagem: \(String(format: "%.0f min", item.data.tempoViagem)) (\(String(format: "%.1f km", item.data.kmViagem).replacingOccurrences(of: ".", with: ",")))")
+                    Text("Viagem: \(String(format: "%.0f min", item.data.tempoViagemMin)) (\(String(format: "%.1f km", item.data.kmViagem).replacingOccurrences(of: ".", with: ",")))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
